@@ -124,7 +124,6 @@ export function useSpeechRecognition(
     browserSupport.hasSpeechRecognition && browserSupport.isHttps;
 
   // Initialize speech recognition
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional stable initialization - deps managed manually
   useEffect(() => {
     if (!isSupported) {
       const errorMsg = !browserSupport.hasSpeechRecognition

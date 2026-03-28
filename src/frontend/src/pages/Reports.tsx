@@ -1,8 +1,58 @@
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, BarChart2, TrendingDown, TrendingUp } from "lucide-react";
-import React, { useMemo } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  useExportData,
+  useGetBusinessPerformanceAnalysis,
+  useGetBusinessProfile,
+  useGetCallerUserProfile,
+  useGetExpenseShareByCategory,
+  useGetMonthlyIncomeExpenseByYear,
+  useGetMonthlyReport,
+  useGetPdfFinancialReportDataByYear,
+  useGetPredictiveAnalysis,
+  useGetYearComparison,
+  useGetYearlyReport,
+  useRunSimulation,
+} from "@/hooks/useQueries";
+import { exportToPDFByYear } from "@/lib/export-utils";
+import {
+  MONTH_NAMES,
+  centsToEur,
+  formatCurrency,
+  getMonthEndTimestamp,
+  getMonthName,
+  getMonthStartTimestamp,
+} from "@/lib/utils";
+import {
+  AlertCircle,
+  Banknote,
+  CheckCircle,
+  CreditCard,
+  FileText,
+  RotateCcw,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -18,581 +68,1549 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  useGetAllTransactions,
-  useGetMonthlyReport,
-  useGetYearlyReport,
-} from "../hooks/useQueries";
-import {
-  CROATIAN_MONTHS,
-  centsToEur,
-  formatCurrency,
-  getMonthName,
-} from "../lib/utils";
-
-const currentDate = new Date();
-const currentMonth = currentDate.getMonth() + 1;
-const currentYear = currentDate.getFullYear();
-
-const CHART_COLORS = [
-  "#f97316",
-  "#3b82f6",
-  "#22c55e",
-  "#a855f7",
-  "#ef4444",
-  "#eab308",
-  "#06b6d4",
-];
-
-function safeNumber(val: unknown, fallback = 0): number {
-  if (val === null || val === undefined) return fallback;
-  const n = typeof val === "bigint" ? Number(val) : Number(val);
-  if (Number.isNaN(n) || !Number.isFinite(n)) return fallback;
-  return n;
-}
-
-function safeCentsToEur(val: unknown, fallback = 0): number {
-  return centsToEur(safeNumber(val, fallback));
-}
+import { toast } from "sonner";
 
 export default function Reports() {
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [yearlyReportYear, setYearlyReportYear] = useState(currentYear);
+  const [comparisonYears, setComparisonYears] = useState<number[]>([
+    currentYear,
+    currentYear - 1,
+  ]);
+  const [pdfExportYear, setPdfExportYear] = useState<number | null>(
+    currentYear,
+  );
+
+  // Predictive analysis state
+  const [incomeGrowth, setIncomeGrowth] = useState<string>("0");
+  const [expenseGrowth, setExpenseGrowth] = useState<string>("0");
+  const [simulationResult, setSimulationResult] = useState<any>(null);
+
+  // Business performance analysis state
+  const [analysisPeriod, setAnalysisPeriod] = useState<
+    "monthly" | "yearly" | "cumulative"
+  >("monthly");
+  const [analysisMonth, setAnalysisMonth] = useState(currentMonth);
+  const [analysisYear, setAnalysisYear] = useState(currentYear);
+
+  const { data: monthlyReport, isLoading: monthlyLoading } =
+    useGetMonthlyReport(selectedMonth, selectedYear);
+  const { data: yearlyReport, isLoading: yearlyLoading } =
+    useGetYearlyReport(yearlyReportYear);
+  const { data: monthlyIncomeExpense, isLoading: monthlyIncomeExpenseLoading } =
+    useGetMonthlyIncomeExpenseByYear(selectedYear);
+  const { data: yearComparison, isLoading: yearComparisonLoading } =
+    useGetYearComparison(comparisonYears);
+  const { data: userProfile } = useGetCallerUserProfile();
+  const { data: businessProfile } = useGetBusinessProfile();
+  const { data: predictiveData, isLoading: predictiveLoading } =
+    useGetPredictiveAnalysis();
+  const exportDataMutation = useExportData();
+  const getPdfDataMutation = useGetPdfFinancialReportDataByYear();
+  const runSimulationMutation = useRunSimulation();
+
+  // Business performance analysis query with proper parameters
   const {
-    data: monthlyReport,
-    isLoading: monthlyLoading,
-    isError: monthlyError,
-  } = useGetMonthlyReport(currentYear, currentMonth);
+    data: performanceAnalysis,
+    isLoading: performanceLoading,
+    error: performanceError,
+  } = useGetBusinessPerformanceAnalysis(
+    analysisPeriod,
+    analysisPeriod === "monthly" ? analysisMonth : undefined,
+    analysisPeriod !== "cumulative" ? analysisYear : undefined,
+  );
 
-  const {
-    data: yearlyReport,
-    isLoading: yearlyLoading,
-    isError: yearlyError,
-  } = useGetYearlyReport(currentYear);
+  const { startDate, endDate } = useMemo(() => {
+    return {
+      startDate: getMonthStartTimestamp(selectedMonth, selectedYear),
+      endDate: getMonthEndTimestamp(selectedMonth, selectedYear),
+    };
+  }, [selectedMonth, selectedYear]);
 
-  const {
-    data: allTransactions,
-    isLoading: txLoading,
-    isError: txError,
-  } = useGetAllTransactions();
+  const { data: expenseShare, isLoading: expenseShareLoading } =
+    useGetExpenseShareByCategory(startDate, endDate);
 
-  // --- Monthly bar chart data ---
-  const monthlyBarData = useMemo(() => {
-    try {
-      if (!yearlyReport?.monthlyOverviews) return [];
-      return CROATIAN_MONTHS.map((label, idx) => {
-        const overview = yearlyReport.monthlyOverviews?.[idx];
-        return {
-          name: label.slice(0, 3),
-          prihodi: safeCentsToEur(overview?.totalIncome),
-          rashodi: safeCentsToEur(overview?.totalExpenses),
-        };
-      });
-    } catch {
-      return [];
-    }
-  }, [yearlyReport]);
+  const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
 
-  // --- Expense pie chart data ---
-  const expensePieData = useMemo(() => {
-    try {
-      if (!monthlyReport?.expensesByCategory) return [];
-      return (monthlyReport.expensesByCategory ?? [])
-        .filter((cat) => cat?.category && safeNumber(cat.total) > 0)
-        .map((cat) => ({
-          name: cat.category ?? "Ostalo",
-          value: safeCentsToEur(cat.total),
-        }));
-    } catch {
-      return [];
-    }
-  }, [monthlyReport]);
+  const monthlyIncomeExpenseChartData = monthlyIncomeExpense
+    ? monthlyIncomeExpense.map((data) => ({
+        name: getMonthName(Number(data.month) - 1).substring(0, 3),
+        Prihodi: centsToEur(data.totalIncome),
+        Rashodi: centsToEur(data.totalExpenses),
+      }))
+    : [];
 
-  // --- Payment method data ---
-  const paymentMethodData = useMemo(() => {
-    try {
-      if (!monthlyReport?.incomeByPaymentMethod) return [];
-      return (monthlyReport.incomeByPaymentMethod ?? [])
-        .filter((pm) => pm?.paymentMethod && safeNumber(pm.total) > 0)
-        .map((pm) => ({
-          name: pm.paymentMethod ?? "Ostalo",
-          value: safeCentsToEur(pm.total),
-        }));
-    } catch {
-      return [];
-    }
-  }, [monthlyReport]);
+  const yearlyChartData = yearlyReport
+    ? yearlyReport.monthlyOverviews.map((overview, index) => ({
+        name: getMonthName(index).substring(0, 3),
+        Prihodi: centsToEur(overview.totalIncome),
+        Rashodi: centsToEur(overview.totalExpenses),
+        Profit: centsToEur(overview.profit),
+      }))
+    : [];
 
-  // --- Transaction trend (last 30 days) ---
-  const transactionTrendData = useMemo(() => {
-    try {
-      if (!allTransactions || allTransactions.length === 0) return [];
-      const now = Date.now();
-      const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-      const recent = allTransactions.filter((tx) => {
-        const ts = safeNumber(tx?.date) / 1_000_000;
-        return ts >= thirtyDaysAgo;
-      });
-
-      const byDay: Record<string, { prihodi: number; rashodi: number }> = {};
-      for (const tx of recent) {
-        try {
-          const ts = safeNumber(tx?.date) / 1_000_000;
-          const dateKey = new Date(ts).toLocaleDateString("hr-HR", {
-            day: "2-digit",
-            month: "2-digit",
+  const comparisonChartData =
+    yearComparison && yearComparison.length > 0
+      ? MONTH_NAMES.map((_, monthIndex) => {
+          const dataPoint: any = {
+            name: getMonthName(monthIndex).substring(0, 3),
+          };
+          // biome-ignore lint/complexity/noForEach: existing pattern
+          yearComparison.forEach((yearData) => {
+            const monthData = yearData.monthlyData?.[monthIndex];
+            if (!monthData) return;
+            dataPoint[`Prihodi ${yearData.year}`] = centsToEur(
+              monthData.totalIncome,
+            );
+            dataPoint[`Rashodi ${yearData.year}`] = centsToEur(
+              monthData.totalExpenses,
+            );
           });
-          if (!byDay[dateKey]) byDay[dateKey] = { prihodi: 0, rashodi: 0 };
-          const isIncome =
-            tx?.transactionType === "prihod" ||
-            (tx?.transactionType as unknown as { __kind__: string })
-              ?.__kind__ === "prihod";
-          const amount = safeCentsToEur(tx?.amount);
-          if (isIncome) {
-            byDay[dateKey].prihodi += amount;
-          } else {
-            byDay[dateKey].rashodi += amount;
-          }
-        } catch {
-          // skip malformed transaction
-        }
+          return dataPoint;
+        })
+      : [];
+
+  const doughnutChartData = expenseShare
+    ? expenseShare
+        .filter((item) => Number(item.total) > 0)
+        .map((item) => ({
+          name: item.category,
+          value: centsToEur(item.total),
+          share: item.share,
+        }))
+    : [];
+
+  // Predictive analysis chart data
+  const projectionsToUse =
+    simulationResult?.projections || predictiveData?.projections || [];
+  const predictiveChartData = projectionsToUse.map((proj: any) => ({
+    name: `${getMonthName(Number(proj.month) - 1).substring(0, 3)} ${proj.year}`,
+    "Predviđeni prihodi": centsToEur(proj.projectedIncome),
+    "Predviđeni rashodi": centsToEur(proj.projectedExpenses),
+    "Predviđena dobit": centsToEur(proj.projectedProfit),
+  }));
+
+  // Business performance analysis chart data - using expenseDeviations from backend
+  const performanceChartData =
+    performanceAnalysis?.expenseDeviations?.map((deviation: any) => ({
+      name: deviation.category,
+      "Vaši rashodi": centsToEur(deviation.userValue),
+      "Prosjek industrije": centsToEur(deviation.industryAverage),
+    })) || [];
+
+  const yearColors = [
+    "hsl(142, 76%, 36%)",
+    "hsl(217, 91%, 60%)",
+    "hsl(280, 65%, 60%)",
+    "hsl(25, 95%, 53%)",
+    "hsl(340, 82%, 52%)",
+  ];
+
+  const categoryColors = [
+    "hsl(0, 84%, 60%)",
+    "hsl(280, 65%, 60%)",
+    "hsl(25, 95%, 53%)",
+    "hsl(217, 91%, 60%)",
+    "hsl(142, 76%, 36%)",
+    "hsl(45, 93%, 47%)",
+    "hsl(340, 82%, 52%)",
+  ];
+
+  const handleYearToggle = (year: number) => {
+    setComparisonYears((prev) => {
+      if (prev.includes(year)) {
+        return prev.filter((y) => y !== year);
       }
+      return [...prev, year].sort((a, b) => b - a);
+    });
+  };
 
-      return Object.entries(byDay)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, vals]) => ({ name, ...vals }));
-    } catch {
-      return [];
+  const handleExportPDF = async () => {
+    try {
+      const data = await exportDataMutation.mutateAsync();
+      const restaurantName = userProfile?.restaurantName || "Restoran";
+      await exportToPDFByYear(
+        data,
+        restaurantName,
+        pdfExportYear,
+        async (year) => {
+          return await getPdfDataMutation.mutateAsync(year);
+        },
+      );
+      toast.success("PDF izvještaj generiran");
+    } catch (_error) {
+      toast.error("Greška pri generiranju PDF izvještaja");
     }
-  }, [allTransactions]);
+  };
 
-  // --- Summary values ---
-  const monthlyIncome = safeNumber(monthlyReport?.overview?.totalIncome);
-  const monthlyExpenses = safeNumber(monthlyReport?.overview?.totalExpenses);
-  const monthlyProfit = safeNumber(monthlyReport?.overview?.profit);
-  const yearlyIncome = safeNumber(yearlyReport?.totalOverview?.totalIncome);
-  const yearlyExpenses = safeNumber(yearlyReport?.totalOverview?.totalExpenses);
-  const yearlyProfit = safeNumber(yearlyReport?.totalOverview?.profit);
+  const handleRunSimulation = async () => {
+    try {
+      const result = await runSimulationMutation.mutateAsync({
+        incomeGrowthPercentage: Number.parseFloat(incomeGrowth) || 0,
+        expenseGrowthPercentage: Number.parseFloat(expenseGrowth) || 0,
+      });
+      setSimulationResult(result);
+      toast.success("Simulacija izvršena");
+    } catch (_error) {
+      toast.error("Greška pri izvršavanju simulacije");
+    }
+  };
 
-  const isAnyLoading = monthlyLoading || yearlyLoading || txLoading;
-  const isAnyError = monthlyError || yearlyError || txError;
+  const handleResetSimulation = () => {
+    setSimulationResult(null);
+    setIncomeGrowth("0");
+    setExpenseGrowth("0");
+    toast.success("Simulacija resetirana");
+  };
+
+  const renderCustomLabel = (entry: any) => {
+    const percent = (entry.share * 100).toFixed(1);
+    return `${entry.name}: ${percent}%`;
+  };
+
+  const getPerformanceIcon = (deviation: number) => {
+    if (deviation > 10)
+      return <TrendingDown className="h-5 w-5 text-red-600" />;
+    if (deviation < -10)
+      return <TrendingUp className="h-5 w-5 text-green-600" />;
+    return <CheckCircle className="h-5 w-5 text-yellow-600" />;
+  };
+
+  const getPerformanceBadge = (deviation: number) => {
+    if (deviation > 10)
+      return <Badge variant="destructive">Iznad prosjeka</Badge>;
+    if (deviation < -10)
+      return <Badge className="bg-green-600">Ispod prosjeka</Badge>;
+    return <Badge variant="secondary">U prosjeku</Badge>;
+  };
 
   return (
-    <div className="container mx-auto px-4 py-6 space-y-6 max-w-7xl">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+    <div className="container py-8">
+      <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Izvještaji</h1>
-          <p className="text-sm text-muted-foreground">
-            Financijska analiza – {getMonthName(currentMonth)} {currentYear}
-          </p>
+          <h2 className="text-3xl font-bold tracking-tight">Izvještaji</h2>
+          <p className="text-muted-foreground">Detaljni financijski pregledi</p>
         </div>
-        {isAnyLoading && (
-          <Badge
-            variant="outline"
-            className="self-start sm:self-auto animate-pulse"
+
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="pdf-year-select" className="text-sm font-medium">
+              Godina za PDF izvoz:
+            </Label>
+            <Select
+              value={pdfExportYear === null ? "all" : pdfExportYear.toString()}
+              onValueChange={(v) =>
+                setPdfExportYear(v === "all" ? null : Number(v))
+              }
+            >
+              <SelectTrigger id="pdf-year-select" className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Sve godine</SelectItem>
+                {years.map((year) => (
+                  <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            onClick={handleExportPDF}
+            disabled={
+              exportDataMutation.isPending || getPdfDataMutation.isPending
+            }
+            className="mt-6"
           >
-            Učitavanje podataka...
-          </Badge>
-        )}
-        {isAnyError && !isAnyLoading && (
-          <Badge variant="destructive" className="self-start sm:self-auto">
-            Greška pri učitavanju
-          </Badge>
-        )}
+            <FileText className="mr-2 h-4 w-4" />
+            Izvezi PDF
+          </Button>
+        </div>
       </div>
 
-      {/* KPI Summary Cards */}
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          {
-            label: "Prihodi (mj.)",
-            value: monthlyIncome,
-            loading: monthlyLoading,
-            error: monthlyError,
-            color: "text-green-600 dark:text-green-400",
-            icon: <TrendingUp className="w-4 h-4" />,
-          },
-          {
-            label: "Rashodi (mj.)",
-            value: monthlyExpenses,
-            loading: monthlyLoading,
-            error: monthlyError,
-            color: "text-red-600 dark:text-red-400",
-            icon: <TrendingDown className="w-4 h-4" />,
-          },
-          {
-            label: "Dobit (mj.)",
-            value: monthlyProfit,
-            loading: monthlyLoading,
-            error: monthlyError,
-            color: monthlyProfit >= 0 ? "text-primary" : "text-destructive",
-            icon: <BarChart2 className="w-4 h-4" />,
-          },
-          {
-            label: "Prihodi (god.)",
-            value: yearlyIncome,
-            loading: yearlyLoading,
-            error: yearlyError,
-            color: "text-green-600 dark:text-green-400",
-            icon: <TrendingUp className="w-4 h-4" />,
-          },
-          {
-            label: "Rashodi (god.)",
-            value: yearlyExpenses,
-            loading: yearlyLoading,
-            error: yearlyError,
-            color: "text-red-600 dark:text-red-400",
-            icon: <TrendingDown className="w-4 h-4" />,
-          },
-          {
-            label: "Dobit (god.)",
-            value: yearlyProfit,
-            loading: yearlyLoading,
-            error: yearlyError,
-            color: yearlyProfit >= 0 ? "text-primary" : "text-destructive",
-            icon: <BarChart2 className="w-4 h-4" />,
-          },
-        ].map((kpi) => (
-          <Card key={kpi.label} className="p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">{kpi.label}</span>
-              <span className={kpi.color}>{kpi.icon}</span>
-            </div>
-            {kpi.loading ? (
-              <Skeleton className="h-6 w-full mt-1" />
-            ) : kpi.error ? (
-              <div className="flex items-center gap-1 text-muted-foreground mt-1">
-                <AlertCircle className="w-3 h-3" />
-                <span className="text-xs">N/A</span>
-              </div>
-            ) : (
-              <div className={`text-base font-bold ${kpi.color}`}>
-                {formatCurrency(kpi.value)}
-              </div>
-            )}
-          </Card>
-        ))}
-      </section>
+      <Tabs defaultValue="monthly">
+        <TabsList className="mb-6">
+          <TabsTrigger value="monthly">Mjesečni izvještaj</TabsTrigger>
+          <TabsTrigger value="yearly">Godišnji izvještaj</TabsTrigger>
+          <TabsTrigger value="comparison">Usporedba godina</TabsTrigger>
+          <TabsTrigger value="predictive">Prediktivna analiza</TabsTrigger>
+          <TabsTrigger value="performance">Analiza poslovanja</TabsTrigger>
+        </TabsList>
 
-      {/* Monthly Bar Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Prihodi i rashodi po mjesecima – {currentYear}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {yearlyLoading ? (
-            <Skeleton className="h-64 w-full" />
-          ) : yearlyError ? (
-            <div className="flex items-center gap-2 text-muted-foreground h-64 justify-center">
-              <AlertCircle className="w-5 h-5" />
-              <span>Podaci nedostupni</span>
-            </div>
-          ) : monthlyBarData.length === 0 ? (
-            <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-              Nema podataka za prikaz
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart
-                data={monthlyBarData}
-                margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  className="stroke-border"
-                />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}€`} />
-                <Tooltip
-                  formatter={(value: number) => [`${value.toFixed(2)} €`, ""]}
-                  labelStyle={{ color: "var(--foreground)" }}
-                  contentStyle={{
-                    backgroundColor: "var(--card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Legend />
-                <Bar
-                  dataKey="prihodi"
-                  fill="#22c55e"
-                  name="Prihodi"
-                  radius={[3, 3, 0, 0]}
-                />
-                <Bar
-                  dataKey="rashodi"
-                  fill="#ef4444"
-                  name="Rashodi"
-                  radius={[3, 3, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
+        <TabsContent value="monthly" className="space-y-6">
+          <div className="flex gap-4">
+            <Select
+              value={selectedMonth.toString()}
+              onValueChange={(v) => setSelectedMonth(Number(v))}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MONTH_NAMES.map((month, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                  <SelectItem key={index} value={(index + 1).toString()}>
+                    {month}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-      {/* Expense Pie + Payment Method */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Expense Categories Pie */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              Rashodi po kategorijama – {getMonthName(currentMonth)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {monthlyLoading ? (
-              <Skeleton className="h-56 w-full" />
-            ) : monthlyError ? (
-              <div className="flex items-center gap-2 text-muted-foreground h-56 justify-center">
-                <AlertCircle className="w-5 h-5" />
-                <span>Podaci nedostupni</span>
-              </div>
-            ) : expensePieData.length === 0 ? (
-              <div className="flex items-center justify-center h-56 text-muted-foreground text-sm">
-                Nema rashoda ovaj mjesec
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={expensePieData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    dataKey="value"
-                    label={({ name, percent }) =>
-                      `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                    }
-                    labelLine={false}
-                  >
-                    {expensePieData.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number) => [`${value.toFixed(2)} €`, ""]}
-                    contentStyle={{
-                      backgroundColor: "var(--card)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+            <Select
+              value={selectedYear.toString()}
+              onValueChange={(v) => setSelectedYear(Number(v))}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map((year) => (
+                  <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-        {/* Payment Methods */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              Prihodi po načinu plaćanja – {getMonthName(currentMonth)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {monthlyLoading ? (
-              <Skeleton className="h-56 w-full" />
-            ) : monthlyError ? (
-              <div className="flex items-center gap-2 text-muted-foreground h-56 justify-center">
-                <AlertCircle className="w-5 h-5" />
-                <span>Podaci nedostupni</span>
-              </div>
-            ) : paymentMethodData.length === 0 ? (
-              <div className="flex items-center justify-center h-56 text-muted-foreground text-sm">
-                Nema podataka o načinu plaćanja
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={paymentMethodData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    dataKey="value"
-                    label={({ name, percent }) =>
-                      `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                    }
-                    labelLine={false}
-                  >
-                    {paymentMethodData.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number) => [`${value.toFixed(2)} €`, ""]}
-                    contentStyle={{
-                      backgroundColor: "var(--card)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Transaction Trend Line Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Trend transakcija – zadnjih 30 dana
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {txLoading ? (
-            <Skeleton className="h-64 w-full" />
-          ) : txError ? (
-            <div className="flex items-center gap-2 text-muted-foreground h-64 justify-center">
-              <AlertCircle className="w-5 h-5" />
-              <span>Podaci nedostupni</span>
-            </div>
-          ) : transactionTrendData.length === 0 ? (
-            <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-              Nema transakcija u zadnjih 30 dana
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart
-                data={transactionTrendData}
-                margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  className="stroke-border"
-                />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v}€`} />
-                <Tooltip
-                  formatter={(value: number) => [`${value.toFixed(2)} €`, ""]}
-                  labelStyle={{ color: "var(--foreground)" }}
-                  contentStyle={{
-                    backgroundColor: "var(--card)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="prihodi"
-                  stroke="#22c55e"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Prihodi"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="rashodi"
-                  stroke="#ef4444"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Rashodi"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Expense Category Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Detalji rashoda – {getMonthName(currentMonth)} {currentYear}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
           {monthlyLoading ? (
-            <div className="space-y-2">
-              {["a", "b", "c", "d", "e"].map((k) => (
-                <div key={k} className="flex justify-between">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-4 w-20" />
-                </div>
-              ))}
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-64 w-full" />
             </div>
-          ) : monthlyError ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-4">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-sm">Podaci nedostupni</span>
-            </div>
-          ) : !monthlyReport?.expensesByCategory ||
-            monthlyReport.expensesByCategory.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              Nema rashoda ovaj mjesec
-            </p>
+          ) : monthlyReport ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Ukupni prihodi
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-600">
+                      {formatCurrency(
+                        centsToEur(monthlyReport.overview.totalIncome),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Ukupni rashodi
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-red-600">
+                      {formatCurrency(
+                        centsToEur(monthlyReport.overview.totalExpenses),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Profit
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div
+                      className={`text-2xl font-bold ${
+                        Number(monthlyReport.overview.profit) >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {formatCurrency(
+                        centsToEur(monthlyReport.overview.profit),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Prihodi po načinu plaćanja</CardTitle>
+                    <CardDescription>
+                      Raspodjela prihoda prema načinu plaćanja
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {monthlyReport.incomeByPaymentMethod.map((pm, index) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                          key={index}
+                          className="flex items-center justify-between rounded-lg border p-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            {pm.paymentMethod === "Gotovina" ? (
+                              <Banknote className="h-5 w-5 text-green-600" />
+                            ) : (
+                              <CreditCard className="h-5 w-5 text-green-600" />
+                            )}
+                            <span className="font-medium">
+                              {pm.paymentMethod}
+                            </span>
+                          </div>
+                          <span className="text-lg font-semibold text-green-600">
+                            {formatCurrency(centsToEur(pm.total))}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Rashodi po kategorijama</CardTitle>
+                    <CardDescription>Raspodjela rashoda</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {monthlyReport.expensesByCategory.map((cat, index) => (
+                        <div
+                          // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                          key={index}
+                          className="flex items-center justify-between"
+                        >
+                          <span className="text-sm font-medium">
+                            {cat.category}
+                          </span>
+                          <span className="text-sm font-semibold text-red-600">
+                            {formatCurrency(centsToEur(cat.total))}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Udio rashoda po kategorijama</CardTitle>
+                  <CardDescription>
+                    Vizualni prikaz udjela svake kategorije rashoda za{" "}
+                    {MONTH_NAMES[selectedMonth - 1]} {selectedYear}.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {expenseShareLoading ? (
+                    <Skeleton className="h-[400px] w-full" />
+                  ) : doughnutChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={400}>
+                      <PieChart>
+                        <Pie
+                          data={doughnutChartData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={renderCustomLabel}
+                          outerRadius={120}
+                          innerRadius={70}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {doughnutChartData.map((_entry, index) => (
+                            <Cell
+                              // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                              key={`cell-${index}`}
+                              fill={
+                                categoryColors[index % categoryColors.length]
+                              }
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number) => formatCurrency(value)}
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--background))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "8px",
+                          }}
+                        />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex h-[400px] items-center justify-center text-muted-foreground">
+                      Nema rashoda za odabrani period
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Godišnji pregled prihoda i rashoda</CardTitle>
+                  <CardDescription>
+                    Usporedba ukupnih prihoda i rashoda po mjesecima za{" "}
+                    {selectedYear}. godinu
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {monthlyIncomeExpenseLoading ? (
+                    <Skeleton className="h-[300px] w-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={monthlyIncomeExpenseChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip
+                          formatter={(value) => formatCurrency(Number(value))}
+                        />
+                        <Legend />
+                        <Bar
+                          dataKey="Prihodi"
+                          fill="hsl(142, 76%, 36%)"
+                          name="Prihodi"
+                        />
+                        <Bar
+                          dataKey="Rashodi"
+                          fill="hsl(0, 84%, 60%)"
+                          name="Rashodi"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-2 text-muted-foreground font-medium">
-                      Kategorija
-                    </th>
-                    <th className="text-right py-2 text-muted-foreground font-medium">
-                      Iznos
-                    </th>
-                    <th className="text-right py-2 text-muted-foreground font-medium">
-                      Udio
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(monthlyReport.expensesByCategory ?? []).map((cat) => {
-                    if (!cat) return null;
-                    const total = safeNumber(cat.total);
-                    const share =
-                      monthlyExpenses > 0
-                        ? ((total / monthlyExpenses) * 100).toFixed(1)
-                        : "0.0";
-                    return (
-                      <tr
-                        key={cat.category ?? "unknown"}
-                        className="border-b border-border/50 last:border-0"
-                      >
-                        <td className="py-2 text-foreground">
-                          {cat.category ?? "Ostalo"}
-                        </td>
-                        <td className="py-2 text-right font-medium">
-                          {formatCurrency(total)}
-                        </td>
-                        <td className="py-2 text-right text-muted-foreground">
-                          {share}%
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-border">
-                    <td className="py-2 font-semibold">Ukupno</td>
-                    <td className="py-2 text-right font-semibold">
-                      {formatCurrency(monthlyExpenses)}
-                    </td>
-                    <td className="py-2 text-right text-muted-foreground">
-                      100%
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Nema podataka za odabrani mjesec
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        <TabsContent value="yearly" className="space-y-6">
+          <div className="flex gap-4">
+            <Select
+              value={yearlyReportYear.toString()}
+              onValueChange={(v) => setYearlyReportYear(Number(v))}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map((year) => (
+                  <SelectItem key={year} value={year.toString()}>
+                    {year}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {yearlyLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-96 w-full" />
+            </div>
+          ) : yearlyReport ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Ukupni prihodi
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-600">
+                      {formatCurrency(
+                        centsToEur(yearlyReport.totalOverview.totalIncome),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Ukupni rashodi
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-red-600">
+                      {formatCurrency(
+                        centsToEur(yearlyReport.totalOverview.totalExpenses),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Profit
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div
+                      className={`text-2xl font-bold ${
+                        Number(yearlyReport.totalOverview.profit) >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {formatCurrency(
+                        centsToEur(yearlyReport.totalOverview.profit),
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Prihodi po načinu plaćanja</CardTitle>
+                  <CardDescription>
+                    Godišnja raspodjela prihoda prema načinu plaćanja
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {yearlyReport.incomeByPaymentMethod.map((pm, index) => (
+                      <div
+                        // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                        key={index}
+                        className="flex items-center justify-between rounded-lg border p-4"
+                      >
+                        <div className="flex items-center gap-3">
+                          {pm.paymentMethod === "Gotovina" ? (
+                            <Banknote className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <CreditCard className="h-5 w-5 text-green-600" />
+                          )}
+                          <span className="font-medium">
+                            {pm.paymentMethod}
+                          </span>
+                        </div>
+                        <span className="text-lg font-semibold text-green-600">
+                          {formatCurrency(centsToEur(pm.total))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Mjesečni pregled</CardTitle>
+                  <CardDescription>
+                    Prihodi, rashodi i profit kroz godinu
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart data={yearlyChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      <Bar
+                        dataKey="Prihodi"
+                        fill="hsl(142, 76%, 36%)"
+                        name="Prihodi"
+                      />
+                      <Bar
+                        dataKey="Rashodi"
+                        fill="hsl(0, 84%, 60%)"
+                        name="Rashodi"
+                      />
+                      <Bar
+                        dataKey="Profit"
+                        fill="hsl(217, 91%, 60%)"
+                        name="Profit"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Nema podataka za odabranu godinu
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="comparison" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Odabir godina za usporedbu</CardTitle>
+              <CardDescription>
+                Odaberite dvije ili više godina za usporedbu
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5">
+                {years.map((year) => (
+                  <div key={year} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`year-${year}`}
+                      checked={comparisonYears.includes(year)}
+                      onCheckedChange={() => handleYearToggle(year)}
+                    />
+                    <Label
+                      htmlFor={`year-${year}`}
+                      className="cursor-pointer text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {year}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {comparisonYears.length < 2 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Odaberite najmanje dvije godine za usporedbu
+              </CardContent>
+            </Card>
+          ) : yearComparisonLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-96 w-full" />
+            </div>
+          ) : yearComparison && yearComparison.length > 0 ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {yearComparison.map((yearData) => (
+                  <Card key={yearData.year}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg">
+                        {yearData.year}. godina
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">
+                          Prihodi:
+                        </span>
+                        <span className="text-sm font-semibold text-green-600">
+                          {formatCurrency(centsToEur(yearData.totalIncome))}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-muted-foreground">
+                          Rashodi:
+                        </span>
+                        <span className="text-sm font-semibold text-red-600">
+                          {formatCurrency(centsToEur(yearData.totalExpenses))}
+                        </span>
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="text-sm font-medium">Profit:</span>
+                        <span
+                          className={`text-sm font-bold ${
+                            Number(yearData.totalIncome) -
+                              Number(yearData.totalExpenses) >=
+                            0
+                              ? "text-green-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {formatCurrency(
+                            centsToEur(yearData.totalIncome) -
+                              centsToEur(yearData.totalExpenses),
+                          )}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Usporedba prihoda po mjesecima</CardTitle>
+                  <CardDescription>
+                    Mjesečni prihodi za odabrane godine
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <LineChart data={comparisonChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      {yearComparison.map((yearData, index) => (
+                        <Line
+                          key={`income-${yearData.year}`}
+                          type="monotone"
+                          dataKey={`Prihodi ${yearData.year}`}
+                          stroke={yearColors[index % yearColors.length]}
+                          strokeWidth={2}
+                          name={`Prihodi ${yearData.year}`}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Usporedba rashoda po mjesecima</CardTitle>
+                  <CardDescription>
+                    Mjesečni rashodi za odabrane godine
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <LineChart data={comparisonChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      {yearComparison.map((yearData, index) => (
+                        <Line
+                          key={`expense-${yearData.year}`}
+                          type="monotone"
+                          dataKey={`Rashodi ${yearData.year}`}
+                          stroke={yearColors[index % yearColors.length]}
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          name={`Rashodi ${yearData.year}`}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Nema podataka za odabrane godine
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="predictive" className="space-y-6">
+          {predictiveLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-96 w-full" />
+            </div>
+          ) : predictiveData ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5" />
+                    Prediktivna analiza
+                  </CardTitle>
+                  <CardDescription>
+                    Projekcije prihoda, rashoda i profita za sljedeća tri
+                    mjeseca na temelju povijesnih podataka
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="rounded-lg border bg-muted/50 p-4">
+                      <p className="text-sm text-muted-foreground">
+                        Projekcije se temelje na analizi trendova i prosjeka iz
+                        posljednja tri mjeseca. Koristite simulaciju za
+                        testiranje različitih scenarija rasta ili pada.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      {projectionsToUse.map((proj: any, index: number) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                        <Card key={index}>
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-base">
+                              {getMonthName(Number(proj.month) - 1)} {proj.year}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">
+                                Prihodi:
+                              </span>
+                              <span className="text-sm font-semibold text-green-600">
+                                {formatCurrency(
+                                  centsToEur(proj.projectedIncome),
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">
+                                Rashodi:
+                              </span>
+                              <span className="text-sm font-semibold text-red-600">
+                                {formatCurrency(
+                                  centsToEur(proj.projectedExpenses),
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex justify-between border-t pt-2">
+                              <span className="text-sm font-medium">
+                                Profit:
+                              </span>
+                              <span
+                                className={`text-sm font-bold ${
+                                  Number(proj.projectedProfit) >= 0
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }`}
+                              >
+                                {formatCurrency(
+                                  centsToEur(proj.projectedProfit),
+                                )}
+                              </span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Simulacija scenarija</CardTitle>
+                  <CardDescription>
+                    Prilagodite postotke rasta ili pada prihoda i rashoda za
+                    testiranje različitih scenarija
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="income-growth">Rast prihoda (%)</Label>
+                        <Input
+                          id="income-growth"
+                          type="number"
+                          step="0.1"
+                          value={incomeGrowth}
+                          onChange={(e) => setIncomeGrowth(e.target.value)}
+                          placeholder="npr. 10 za +10%"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Pozitivna vrijednost za rast, negativna za pad
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="expense-growth">Rast rashoda (%)</Label>
+                        <Input
+                          id="expense-growth"
+                          type="number"
+                          step="0.1"
+                          value={expenseGrowth}
+                          onChange={(e) => setExpenseGrowth(e.target.value)}
+                          placeholder="npr. 5 za +5%"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Pozitivna vrijednost za rast, negativna za pad
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleRunSimulation}
+                        disabled={runSimulationMutation.isPending}
+                        className="flex-1"
+                      >
+                        <TrendingUp className="mr-2 h-4 w-4" />
+                        {runSimulationMutation.isPending
+                          ? "Izvršavanje..."
+                          : "Pokreni simulaciju"}
+                      </Button>
+
+                      {simulationResult && (
+                        <Button
+                          onClick={handleResetSimulation}
+                          variant="outline"
+                        >
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          Resetiraj
+                        </Button>
+                      )}
+                    </div>
+
+                    {simulationResult && (
+                      <div className="rounded-lg border bg-primary/5 p-4">
+                        <p className="text-sm font-medium">
+                          Rezultati simulacije:
+                        </p>
+                        <div className="mt-2 grid gap-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">
+                              Ukupni predviđeni prihodi:
+                            </span>
+                            <span className="font-semibold text-green-600">
+                              {formatCurrency(
+                                centsToEur(
+                                  simulationResult.totalProjectedIncome,
+                                ),
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">
+                              Ukupni predviđeni rashodi:
+                            </span>
+                            <span className="font-semibold text-red-600">
+                              {formatCurrency(
+                                centsToEur(
+                                  simulationResult.totalProjectedExpenses,
+                                ),
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t pt-2">
+                            <span className="font-medium">
+                              Ukupna predviđena dobit:
+                            </span>
+                            <span
+                              className={`font-bold ${
+                                Number(simulationResult.totalProjectedProfit) >=
+                                0
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {formatCurrency(
+                                centsToEur(
+                                  simulationResult.totalProjectedProfit,
+                                ),
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Grafički prikaz projekcija</CardTitle>
+                  <CardDescription>
+                    {simulationResult
+                      ? "Vizualizacija simuliranih projekcija"
+                      : "Vizualizacija osnovnih projekcija"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <LineChart data={predictiveChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="Predviđeni prihodi"
+                        stroke="hsl(142, 76%, 36%)"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="Predviđeni rashodi"
+                        stroke="hsl(0, 84%, 60%)"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="Predviđena dobit"
+                        stroke="hsl(217, 91%, 60%)"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Usporedba projekcija</CardTitle>
+                  <CardDescription>
+                    Stupčasti prikaz predviđenih prihoda i rashoda
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={400}>
+                    <BarChart data={predictiveChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      <Bar
+                        dataKey="Predviđeni prihodi"
+                        fill="hsl(142, 76%, 36%)"
+                      />
+                      <Bar
+                        dataKey="Predviđeni rashodi"
+                        fill="hsl(0, 84%, 60%)"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Nema dovoljno povijesnih podataka za generiranje projekcija
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="performance" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Analiza poslovanja
+              </CardTitle>
+              <CardDescription>
+                Usporedba vašeg poslovanja s prosjekom industrije ugostiteljstva
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-muted/50 p-4">
+                  <p className="text-sm text-muted-foreground">
+                    Analiza uspoređuje vaše financijske pokazatelje s
+                    verificiranim prosjekom industrije (Eurostat/DZS). Rezultati
+                    su prilagođeni prema parametrima vašeg profila objekta.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="analysis-period">Period analize</Label>
+                    <Select
+                      value={analysisPeriod}
+                      onValueChange={(v: any) => setAnalysisPeriod(v)}
+                    >
+                      <SelectTrigger id="analysis-period">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="monthly">Mjesečno</SelectItem>
+                        <SelectItem value="yearly">Godišnje</SelectItem>
+                        <SelectItem value="cumulative">
+                          Kumulativno (svi mjeseci)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {analysisPeriod === "monthly" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="analysis-month">Mjesec</Label>
+                      <Select
+                        value={analysisMonth.toString()}
+                        onValueChange={(v) => setAnalysisMonth(Number(v))}
+                      >
+                        <SelectTrigger id="analysis-month">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MONTH_NAMES.map((month, index) => (
+                            <SelectItem
+                              // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                              key={index}
+                              value={(index + 1).toString()}
+                            >
+                              {month}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {analysisPeriod !== "cumulative" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="analysis-year">Godina</Label>
+                      <Select
+                        value={analysisYear.toString()}
+                        onValueChange={(v) => setAnalysisYear(Number(v))}
+                      >
+                        <SelectTrigger id="analysis-year">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {years.map((year) => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                {performanceAnalysis?.diagnosticInfo && (
+                  <div className="rounded-lg border bg-blue-50 p-4 dark:bg-blue-950/20">
+                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                      Dijagnostika:
+                    </p>
+                    <p className="mt-1 text-sm text-blue-800 dark:text-blue-200">
+                      {performanceAnalysis.diagnosticInfo}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {!businessProfile ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <AlertCircle className="mx-auto mb-4 h-12 w-12 text-yellow-600" />
+                <p className="text-lg font-medium">
+                  Profil objekta nije postavljen
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Za analizu poslovanja potrebno je prvo postaviti profil
+                  objekta s parametrima lokacije, broja sjedala, vrste ponude i
+                  sezonske aktivnosti.
+                </p>
+              </CardContent>
+            </Card>
+          ) : performanceLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-96 w-full" />
+            </div>
+          ) : performanceError ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <AlertCircle className="mx-auto mb-4 h-12 w-12 text-red-600" />
+                <p className="text-lg font-medium">
+                  Greška pri učitavanju analize
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {performanceError.message || "Molimo pokušajte ponovno"}
+                </p>
+              </CardContent>
+            </Card>
+          ) : performanceAnalysis ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Performanse prihoda
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-2xl font-bold">
+                          {formatCurrency(
+                            centsToEur(performanceAnalysis.userIncome),
+                          )}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Prosjek:{" "}
+                          {formatCurrency(
+                            centsToEur(
+                              performanceAnalysis.industryBenchmark
+                                .averageIncome,
+                            ),
+                          )}
+                        </div>
+                      </div>
+                      {getPerformanceIcon(
+                        performanceAnalysis.incomeDeviation.deviationPercentage,
+                      )}
+                    </div>
+                    <div className="mt-2">
+                      {getPerformanceBadge(
+                        performanceAnalysis.incomeDeviation.deviationPercentage,
+                      )}
+                      <span className="ml-2 text-sm font-medium">
+                        {performanceAnalysis.incomeDeviation
+                          .deviationPercentage > 0
+                          ? "+"
+                          : ""}
+                        {performanceAnalysis.incomeDeviation.deviationPercentage.toFixed(
+                          1,
+                        )}
+                        %
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      Marža profita
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-2xl font-bold">
+                          {(
+                            Number(
+                              performanceAnalysis.profitMarginDeviation
+                                .userValue,
+                            ) / 100
+                          ).toFixed(1)}
+                          %
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          Prosjek:{" "}
+                          {(
+                            Number(
+                              performanceAnalysis.profitMarginDeviation
+                                .industryAverage,
+                            ) / 100
+                          ).toFixed(1)}
+                          %
+                        </div>
+                      </div>
+                      {getPerformanceIcon(
+                        performanceAnalysis.profitMarginDeviation
+                          .deviationPercentage,
+                      )}
+                    </div>
+                    <div className="mt-2">
+                      {getPerformanceBadge(
+                        performanceAnalysis.profitMarginDeviation
+                          .deviationPercentage,
+                      )}
+                      <span className="ml-2 text-sm font-medium">
+                        {performanceAnalysis.profitMarginDeviation
+                          .deviationPercentage > 0
+                          ? "+"
+                          : ""}
+                        {performanceAnalysis.profitMarginDeviation.deviationPercentage.toFixed(
+                          1,
+                        )}
+                        %
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {performanceAnalysis.industryBenchmark.revenuePerSeat && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium">
+                        Prihod po sjedalu
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-2xl font-bold">
+                            {formatCurrency(
+                              centsToEur(
+                                businessProfile.numberOfSeats > 0
+                                  ? performanceAnalysis.userIncome /
+                                      BigInt(businessProfile.numberOfSeats)
+                                  : BigInt(0),
+                              ),
+                            )}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            Prosjek:{" "}
+                            {formatCurrency(
+                              centsToEur(
+                                performanceAnalysis.industryBenchmark
+                                  .revenuePerSeat,
+                              ),
+                            )}
+                          </div>
+                        </div>
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Analiza rashoda po kategorijama</CardTitle>
+                  <CardDescription>
+                    Usporedba vaših rashoda s prosjekom industrije
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {(performanceAnalysis.expenseDeviations ?? []).map(
+                      (deviation: any, index: number) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                        <div key={index} className="rounded-lg border p-4">
+                          <div className="mb-2 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">
+                                {deviation.category}
+                              </span>
+                              {getPerformanceBadge(
+                                deviation.deviationPercentage,
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {getPerformanceIcon(
+                                deviation.deviationPercentage,
+                              )}
+                              <span className="text-sm font-medium">
+                                {deviation.deviationPercentage > 0 ? "+" : ""}
+                                {deviation.deviationPercentage.toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+                          <div className="grid gap-2 text-sm md:grid-cols-2">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Vaši rashodi:
+                              </span>
+                              <span className="font-semibold">
+                                {formatCurrency(
+                                  centsToEur(deviation.userValue),
+                                )}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">
+                                Prosjek industrije:
+                              </span>
+                              <span className="font-semibold">
+                                {formatCurrency(
+                                  centsToEur(deviation.industryAverage),
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {performanceChartData.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Grafička usporedba rashoda</CardTitle>
+                    <CardDescription>
+                      Vizualni prikaz vaših rashoda u odnosu na prosjek
+                      industrije
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart data={performanceChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip
+                          formatter={(value) => formatCurrency(Number(value))}
+                        />
+                        <Legend />
+                        <Bar dataKey="Vaši rashodi" fill="hsl(0, 84%, 60%)" />
+                        <Bar
+                          dataKey="Prosjek industrije"
+                          fill="hsl(217, 91%, 60%)"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              )}
+
+              {performanceAnalysis.recommendations &&
+                performanceAnalysis.recommendations.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Preporuke za poboljšanje</CardTitle>
+                      <CardDescription>
+                        Specifične preporuke temeljene na analizi vašeg
+                        poslovanja
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {performanceAnalysis.recommendations.map(
+                          (rec: string, index: number) => (
+                            <div
+                              // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
+                              key={index}
+                              className="flex gap-3 rounded-lg border p-3"
+                            >
+                              <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
+                              <p className="text-sm">{rec}</p>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                Nema dovoljno podataka za analizu poslovanja
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

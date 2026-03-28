@@ -1,4 +1,3 @@
-import type { ExtendedBackendInterface } from "@/types/backend-types";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useActor } from "./useActor";
@@ -38,9 +37,8 @@ export function useBackendWakeUp() {
         setTimeout(() => reject(new Error("Wake-up timeout")), WAKEUP_TIMEOUT);
       });
 
-      const extendedActor = actor as unknown as ExtendedBackendInterface;
       // Ping the backend using getCurrentTime (public query, no auth required)
-      await Promise.race([extendedActor.getCurrentTime(), timeoutPromise]);
+      await Promise.race([actor.getCurrentTime(), timeoutPromise]);
 
       lastWakeUpTimeRef.current = Date.now();
 

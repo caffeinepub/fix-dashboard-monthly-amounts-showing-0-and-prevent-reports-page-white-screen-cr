@@ -1,3 +1,9 @@
+import {
+  ExpenseCategory,
+  PaymentMethod,
+  type TransactionInput,
+  TransactionType,
+} from "@/backend";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,13 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAddTransaction } from "@/hooks/useQueries";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-import { eurToCentsBigInt, formatCurrency } from "@/lib/utils";
-import {
-  ExpenseCategory,
-  PaymentMethod,
-  type TransactionInput,
-  TransactionType,
-} from "@/types/backend-types";
+import { eurToCents, formatCurrency } from "@/lib/utils";
 import {
   AlertCircle,
   Info,
@@ -354,11 +354,10 @@ export default function VoiceInput() {
     for (const transaction of parsedTransactions) {
       try {
         const input: TransactionInput = {
-          // eurToCentsBigInt returns bigint as required by TransactionInput.amount
-          amount: eurToCentsBigInt(transaction.amount),
+          amount: eurToCents(transaction.amount),
           transactionType: transaction.transactionType,
-          expenseCategory: transaction.expenseCategory || null,
-          paymentMethod: transaction.paymentMethod || null,
+          expenseCategory: transaction.expenseCategory,
+          paymentMethod: transaction.paymentMethod,
           date: BigInt(transaction.date.getTime() * 1000000),
           description: transaction.description,
         };
@@ -538,8 +537,9 @@ export default function VoiceInput() {
                 <AlertDescription>
                   <strong className="text-sm">Greške:</strong>
                   <ul className="mt-2 space-y-1 text-xs">
-                    {errors.map((error) => (
-                      <li key={error}>• {error}</li>
+                    {errors.map((error, idx) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: error list, index key is safe
+                      <li key={idx}>• {error}</li>
                     ))}
                   </ul>
                 </AlertDescription>
@@ -589,9 +589,7 @@ export default function VoiceInput() {
                                   : "Rashod"}
                               </Badge>
                               <span className="text-sm sm:text-base font-semibold">
-                                {formatCurrency(
-                                  Math.round(transaction.amount * 100),
-                                )}
+                                {formatCurrency(transaction.amount)}
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -623,7 +621,7 @@ export default function VoiceInput() {
                             variant="ghost"
                             size="icon"
                             onClick={() => removeTransaction(transaction.id)}
-                            className="h-8 w-8 shrink-0"
+                            className="h-8 w-8 flex-shrink-0"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -635,20 +633,14 @@ export default function VoiceInput() {
 
                 <Button
                   onClick={saveAllTransactions}
-                  className="w-full"
                   disabled={addTransactionMutation.isPending}
+                  className="w-full"
+                  size="lg"
                 >
-                  {addTransactionMutation.isPending ? (
-                    <>
-                      <Save className="mr-2 h-4 w-4 animate-spin" />
-                      Spremanje...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="mr-2 h-4 w-4" />
-                      Spremi sve transakcije ({parsedTransactions.length})
-                    </>
-                  )}
+                  <Save className="mr-2 h-4 w-4" />
+                  {addTransactionMutation.isPending
+                    ? "Spremanje..."
+                    : `Spremi sve transakcije (${parsedTransactions.length})`}
                 </Button>
               </div>
             )}

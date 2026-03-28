@@ -1,3 +1,9 @@
+import {
+  type ExpenseCategory,
+  type PaymentMethod,
+  type Transaction,
+  TransactionType,
+} from "@/backend";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,13 +25,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAddTransaction, useUpdateTransaction } from "@/hooks/useQueries";
 import { useReadOnlyMode } from "@/hooks/useReadOnlyMode";
-import { centsToEur, eurToCentsBigInt } from "@/lib/utils";
-import {
-  type ExpenseCategory,
-  type PaymentMethod,
-  type Transaction,
-  TransactionType,
-} from "@/types/backend-types";
+import { centsToEur, eurToCents } from "@/lib/utils";
 import { AlertCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -53,7 +53,7 @@ export default function TransactionDialog({
   const addMutation = useAddTransaction();
   const updateMutation = useUpdateTransaction();
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: open is intentionally included to reset form when dialog opens/closes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open is needed to reset form state
   useEffect(() => {
     if (transaction) {
       setTransactionType(
@@ -84,8 +84,7 @@ export default function TransactionDialog({
       return;
     }
 
-    // amount must be bigint per TransactionInput
-    const amountInCents = eurToCentsBigInt(Number.parseFloat(amount));
+    const amountInCents = eurToCents(Number.parseFloat(amount));
     const dateTimestamp = BigInt(new Date(date).getTime() * 1000000);
 
     const input = {
@@ -99,11 +98,11 @@ export default function TransactionDialog({
       expenseCategory:
         transactionType === "rashod" && expenseCategory
           ? (expenseCategory as ExpenseCategory)
-          : null,
+          : undefined,
       paymentMethod:
         transactionType === "prihod" && paymentMethod
           ? (paymentMethod as PaymentMethod)
-          : null,
+          : undefined,
     };
 
     try {

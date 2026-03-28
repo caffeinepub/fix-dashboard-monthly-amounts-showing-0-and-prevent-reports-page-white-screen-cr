@@ -15,18 +15,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useInternetIdentity } from "@/hooks/useInternetIdentity";
-import { useExportData } from "@/hooks/useQueries";
+import {
+  useExportData,
+  useGetDfinityTechnicalAnalysis,
+  useGetDfinityTechnicalReport,
+} from "@/hooks/useQueries";
 import { useResync } from "@/hooks/useResync";
 import {
+  exportDfinityTechnicalAnalysisPDF,
+  exportDfinityTechnicalReportPDF,
   exportExternalDfinitySupportPDF,
   exportInternalTechnicalDocumentationPDF,
   exportToCSV,
 } from "@/lib/export-utils";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
+  AlertCircle,
   FileCode,
   FileDown,
+  FileText,
   Menu,
   Mic,
   RefreshCw,
@@ -43,8 +50,7 @@ type Page =
   | "data-analysis"
   | "textual-input"
   | "voice-input"
-  | "business-profile"
-  | "support-report";
+  | "business-profile";
 
 interface HeaderProps {
   currentPage: Page;
@@ -56,6 +62,8 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
   const queryClient = useQueryClient();
   const { resync, isResyncing } = useResync();
   const exportDataMutation = useExportData();
+  const getDfinityReportMutation = useGetDfinityTechnicalReport();
+  const getDfinityAnalysisMutation = useGetDfinityTechnicalAnalysis();
 
   const isAuthenticated = !!identity;
   const disabled = loginStatus === "logging-in";
@@ -86,11 +94,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
   const handleExportJSON = async () => {
     try {
       const data = await exportDataMutation.mutateAsync();
-      const jsonString = JSON.stringify(
-        data,
-        (_key, value) => (typeof value === "bigint" ? value.toString() : value),
-        2,
-      );
+      const jsonString = JSON.stringify(data, null, 2);
       const blob = new Blob([jsonString], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -101,7 +105,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       toast.success("Podaci uspješno izvezeni u JSON formatu");
-    } catch {
+    } catch (_error) {
       toast.error("Greška pri izvozu podataka");
     }
   };
@@ -120,8 +124,28 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       toast.success("Podaci uspješno izvezeni u CSV formatu");
-    } catch {
+    } catch (_error) {
       toast.error("Greška pri izvozu podataka");
+    }
+  };
+
+  const _handleExportDfinityReport = async () => {
+    try {
+      const reportData = await getDfinityReportMutation.mutateAsync();
+      await exportDfinityTechnicalReportPDF(reportData);
+      toast.success("DFINITY izvještaj uspješno generiran");
+    } catch (_error) {
+      toast.error("Greška pri generiranju DFINITY izvještaja");
+    }
+  };
+
+  const _handleExportDfinityAnalysis = async () => {
+    try {
+      const analysisData = await getDfinityAnalysisMutation.mutateAsync();
+      await exportDfinityTechnicalAnalysisPDF(analysisData);
+      toast.success("DFINITY tehnička analiza uspješno generirana");
+    } catch (_error) {
+      toast.error("Greška pri generiranju DFINITY tehničke analize");
     }
   };
 
@@ -129,7 +153,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
     try {
       await exportInternalTechnicalDocumentationPDF();
       toast.success("Interni tehnički izvještaj uspješno generiran");
-    } catch {
+    } catch (_error) {
       toast.error("Greška pri generiranju internog tehničkog izvještaja");
     }
   };
@@ -138,7 +162,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
     try {
       await exportExternalDfinitySupportPDF();
       toast.success("Vanjski izvještaj za DFINITY Support uspješno generiran");
-    } catch {
+    } catch (_error) {
       toast.error(
         "Greška pri generiranju vanjskog izvještaja za DFINITY Support",
       );
@@ -159,7 +183,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4">
-        {/* Logo and Title */}
+        {/* Logo and Title - Responsive */}
         <div className="flex items-center gap-3">
           <img
             src="/assets/generated/restaurant-finance-icon-transparent.dim_64x64.png"
@@ -192,7 +216,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          {/* Resync Button */}
+          {/* Resync Button - visible when authenticated */}
           {isAuthenticated && (
             <TooltipProvider>
               <Tooltip>
@@ -219,7 +243,7 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
             </TooltipProvider>
           )}
 
-          {/* User Menu */}
+          {/* User Menu - visible when authenticated */}
           {isAuthenticated && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -263,12 +287,6 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
                 <DropdownMenuItem onClick={handleExportExternalSupport}>
                   <Mic className="mr-2 h-4 w-4" />
                   Vanjski izvještaj za DFINITY Support
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onNavigate("support-report")}>
-                  <AlertTriangle className="mr-2 h-4 w-4 text-destructive" />
-                  <span className="text-destructive font-medium">
-                    Caffeine Support Izvještaj
-                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Informacije</DropdownMenuLabel>
@@ -378,14 +396,13 @@ export default function Header({ currentPage, onNavigate }: HeaderProps) {
                         <Mic className="mr-2 h-4 w-4" />
                         Vanjski izvještaj za DFINITY Support
                       </Button>
-                      <Button
-                        variant="destructive"
-                        onClick={() => onNavigate("support-report")}
-                        className="w-full justify-start"
-                      >
-                        <AlertTriangle className="mr-2 h-4 w-4" />
-                        Caffeine Support Izvještaj
-                      </Button>
+                    </div>
+
+                    <div className="flex flex-col gap-2 border-t pt-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground">
+                        Informacije
+                      </h3>
+                      <DeploymentInfoDialog />
                     </div>
                   </>
                 )}

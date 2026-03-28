@@ -167,7 +167,7 @@ export default function DataAnalysis() {
     });
 
     // Compare monthly data
-    for (const pdfMonth of pdfData) {
+    pdfData.forEach((pdfMonth) => {
       const monthIndex = Number.parseInt(pdfMonth.month) - 1;
       if (
         monthIndex >= 0 &&
@@ -231,7 +231,7 @@ export default function DataAnalysis() {
                 : "major",
         });
       }
-    }
+    });
 
     setComparisonResults(results);
   };
@@ -279,23 +279,23 @@ export default function DataAnalysis() {
 
     if (majorIssues.length > 0) {
       report += "VELIKE RAZLIKE (zahtijevaju pažnju):\n";
-      for (const issue of majorIssues) {
+      majorIssues.forEach((issue) => {
         report += `\n${issue.category}:\n`;
         report += `  PDF vrijednost: ${formatCurrency(issue.pdfValue)}\n`;
         report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
         report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
-      }
+      });
       report += "\n";
     }
 
     if (minorIssues.length > 0) {
       report += "MALE RAZLIKE (moguće zaokruživanje):\n";
-      for (const issue of minorIssues) {
+      minorIssues.forEach((issue) => {
         report += `\n${issue.category}:\n`;
         report += `  PDF vrijednost: ${formatCurrency(issue.pdfValue)}\n`;
         report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
         report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
-      }
+      });
       report += "\n";
     }
 
@@ -479,7 +479,7 @@ export default function DataAnalysis() {
                           "Prosinac",
                         ];
                         return (
-                          <TableRow key={monthNames[index] ?? index}>
+                          <TableRow key={index}>
                             <TableCell className="font-medium">
                               {monthNames[index]}
                             </TableCell>
@@ -545,8 +545,8 @@ export default function DataAnalysis() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {comparisonResults.map((result) => (
-                      <TableRow key={result.category}>
+                    {comparisonResults.map((result, index) => (
+                      <TableRow key={index}>
                         <TableCell className="font-medium">
                           {result.category}
                         </TableCell>

@@ -36,7 +36,7 @@ import { useReadOnlyMode } from "@/hooks/useReadOnlyMode";
 import {
   MONTH_NAMES,
   centsToEur,
-  eurToCentsBigInt,
+  eurToCents,
   formatCurrency,
 } from "@/lib/utils";
 import { Calendar, Edit2, Loader2, Save, Trash2, X } from "lucide-react";
@@ -65,17 +65,14 @@ export default function QuickIncome() {
     allMonthlyIncomes?.filter(
       (income) => Number(income.year) === selectedYear,
     ) || [];
-
-  // Map month number -> EUR float value
-  const existingIncomesMap = existingIncomes.reduce<Record<number, number>>(
+  const existingIncomesMap = existingIncomes.reduce(
     (acc, income) => {
       acc[Number(income.month)] = centsToEur(income.amount);
       return acc;
     },
-    {},
+    {} as Record<number, number>,
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedYear is a state setter dependency, resetting form when year changes is intentional
   useEffect(() => {
     setMonthlyAmounts({});
     setEditingMonths(new Set());
@@ -86,7 +83,10 @@ export default function QuickIncome() {
   const handleAmountChange = (month: number, value: string) => {
     if (isReadOnly) return;
     const sanitized = value.replace(/[^\d.]/g, "");
-    setMonthlyAmounts((prev) => ({ ...prev, [month]: sanitized }));
+    setMonthlyAmounts((prev) => ({
+      ...prev,
+      [month]: sanitized,
+    }));
   };
 
   const handleEditMonth = (month: number) => {
@@ -103,14 +103,14 @@ export default function QuickIncome() {
 
   const handleCancelEdit = (month: number) => {
     setMonthlyAmounts((prev) => {
-      const next = { ...prev };
-      delete next[month];
-      return next;
+      const newAmounts = { ...prev };
+      delete newAmounts[month];
+      return newAmounts;
     });
     setEditingMonths((prev) => {
-      const next = new Set(prev);
-      next.delete(month);
-      return next;
+      const newSet = new Set(prev);
+      newSet.delete(month);
+      return newSet;
     });
   };
 
@@ -126,17 +126,16 @@ export default function QuickIncome() {
       return;
     }
 
-    const amountEur = Number.parseFloat(amountStr);
-    if (Number.isNaN(amountEur) || amountEur < 0) {
+    const amount = Number.parseFloat(amountStr);
+    if (Number.isNaN(amount) || amount < 0) {
       toast.error("Molimo unesite valjan iznos");
       return;
     }
 
-    // MonthlyIncomeInput.amount is bigint
     const input = {
       year: BigInt(selectedYear),
       month: BigInt(month),
-      amount: eurToCentsBigInt(amountEur),
+      amount: eurToCents(amount),
     };
 
     const isEditing = editingMonths.has(month);
@@ -145,21 +144,26 @@ export default function QuickIncome() {
     try {
       if (isEditing || existingAmount !== undefined) {
         await updateMonthlyIncome.mutateAsync(input);
-        toast.success(`Prihod za ${MONTH_NAMES[month - 1]} ažuriran`);
       } else {
         await addMonthlyIncome.mutateAsync(input);
-        toast.success(`Prihod za ${MONTH_NAMES[month - 1]} spremljen`);
+      }
+
+      const monthName = MONTH_NAMES[month - 1];
+      if (isEditing || existingAmount !== undefined) {
+        toast.success(`Prihod za ${monthName} ažuriran`);
+      } else {
+        toast.success(`Prihod za ${monthName} spremljen`);
       }
 
       setMonthlyAmounts((prev) => {
-        const next = { ...prev };
-        delete next[month];
-        return next;
+        const newAmounts = { ...prev };
+        delete newAmounts[month];
+        return newAmounts;
       });
       setEditingMonths((prev) => {
-        const next = new Set(prev);
-        next.delete(month);
-        return next;
+        const newSet = new Set(prev);
+        newSet.delete(month);
+        return newSet;
       });
     } catch (error: any) {
       console.error("Error saving monthly income:", error);
@@ -187,17 +191,18 @@ export default function QuickIncome() {
         month: BigInt(monthToDelete),
       });
 
-      toast.success(`Prihod za ${MONTH_NAMES[monthToDelete - 1]} obrisan`);
+      const monthName = MONTH_NAMES[monthToDelete - 1];
+      toast.success(`Prihod za ${monthName} obrisan`);
 
       setMonthlyAmounts((prev) => {
-        const next = { ...prev };
-        delete next[monthToDelete];
-        return next;
+        const newAmounts = { ...prev };
+        delete newAmounts[monthToDelete];
+        return newAmounts;
       });
       setEditingMonths((prev) => {
-        const next = new Set(prev);
-        next.delete(monthToDelete);
-        return next;
+        const newSet = new Set(prev);
+        newSet.delete(monthToDelete);
+        return newSet;
       });
     } catch (error: any) {
       console.error("Error deleting monthly income:", error);
@@ -217,7 +222,7 @@ export default function QuickIncome() {
     }
 
     const monthsToSave = Object.entries(monthlyAmounts).filter(
-      ([, value]) => value.trim() !== "",
+      ([_, value]) => value.trim() !== "",
     );
 
     if (monthsToSave.length === 0) {
@@ -230,9 +235,9 @@ export default function QuickIncome() {
 
     for (const [monthStr, amountStr] of monthsToSave) {
       const month = Number.parseInt(monthStr);
-      const amountEur = Number.parseFloat(amountStr);
+      const amount = Number.parseFloat(amountStr);
 
-      if (Number.isNaN(amountEur) || amountEur < 0) {
+      if (Number.isNaN(amount) || amount < 0) {
         errorCount++;
         continue;
       }
@@ -240,7 +245,7 @@ export default function QuickIncome() {
       const input = {
         year: BigInt(selectedYear),
         month: BigInt(month),
-        amount: eurToCentsBigInt(amountEur),
+        amount: eurToCents(amount),
       };
 
       const isEditing = editingMonths.has(month);
@@ -270,9 +275,13 @@ export default function QuickIncome() {
   };
 
   const getDisplayAmount = (month: number): string => {
-    if (monthlyAmounts[month] !== undefined) return monthlyAmounts[month];
+    if (monthlyAmounts[month] !== undefined) {
+      return monthlyAmounts[month];
+    }
     const existing = existingIncomesMap[month];
-    if (existing !== undefined) return existing.toFixed(2);
+    if (existing !== undefined) {
+      return existing.toFixed(2);
+    }
     return "";
   };
 
@@ -282,9 +291,8 @@ export default function QuickIncome() {
     updateMonthlyIncome.isPending ||
     deleteMonthlyIncome.isPending;
 
-  // totalIncome is a plain number (EUR float) — safe to use with formatCurrency
-  const totalIncome: number = Object.values(existingIncomesMap).reduce(
-    (sum: number, amount: number) => sum + amount,
+  const totalIncome = Object.values(existingIncomesMap).reduce(
+    (sum, amount) => sum + amount,
     0,
   );
   const enteredMonthsCount = Object.keys(existingIncomesMap).length;
@@ -368,7 +376,7 @@ export default function QuickIncome() {
                     </CardTitle>
                     {hasExisting && !hasUnsavedChanges && (
                       <CardDescription className="text-xs sm:text-sm">
-                        Trenutni prihod: {formatCurrency(existingAmount * 100)}
+                        Trenutni prihod: {formatCurrency(existingAmount)}
                       </CardDescription>
                     )}
                   </CardHeader>
@@ -399,7 +407,7 @@ export default function QuickIncome() {
                               size="icon"
                               onClick={() => handleSaveMonth(month.value)}
                               disabled={isSaving || isReadOnly}
-                              className="h-10 w-10 sm:h-11 sm:w-11 shrink-0"
+                              className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
                             >
                               {isSaving ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -413,7 +421,7 @@ export default function QuickIncome() {
                                 variant="outline"
                                 onClick={() => handleCancelEdit(month.value)}
                                 disabled={isSaving || isReadOnly}
-                                className="h-10 w-10 sm:h-11 sm:w-11 shrink-0"
+                                className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
                               >
                                 <X className="h-4 w-4" />
                               </Button>
@@ -426,7 +434,7 @@ export default function QuickIncome() {
                               variant="outline"
                               onClick={() => handleEditMonth(month.value)}
                               disabled={isSaving || isReadOnly}
-                              className="h-10 w-10 sm:h-11 sm:w-11 shrink-0"
+                              className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
                             >
                               <Edit2 className="h-4 w-4" />
                             </Button>
@@ -435,7 +443,7 @@ export default function QuickIncome() {
                               variant="destructive"
                               onClick={() => handleDeleteClick(month.value)}
                               disabled={isSaving || isReadOnly}
-                              className="h-10 w-10 sm:h-11 sm:w-11 shrink-0"
+                              className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -449,7 +457,7 @@ export default function QuickIncome() {
                               !monthlyAmounts[month.value] ||
                               isReadOnly
                             }
-                            className="h-10 w-10 sm:h-11 sm:w-11 shrink-0"
+                            className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
                           >
                             {isSaving ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -496,9 +504,8 @@ export default function QuickIncome() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {/* totalIncome is EUR float; multiply by 100 to pass cents to formatCurrency */}
               <div className="text-2xl sm:text-3xl font-bold">
-                {formatCurrency(Math.round(totalIncome * 100))}
+                {formatCurrency(totalIncome)}
               </div>
               <p className="mt-2 text-xs sm:text-sm text-muted-foreground">
                 Uneseno {enteredMonthsCount} od 12 mjeseci

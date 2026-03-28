@@ -1,3 +1,9 @@
+import {
+  ExpenseCategory,
+  PaymentMethod,
+  type TransactionInput,
+  TransactionType,
+} from "@/backend";
 import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,13 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { useAddTransaction } from "@/hooks/useQueries";
 import { useReadOnlyMode } from "@/hooks/useReadOnlyMode";
-import { eurToCentsBigInt, formatCurrency } from "@/lib/utils";
-import {
-  ExpenseCategory,
-  PaymentMethod,
-  type TransactionInput,
-  TransactionType,
-} from "@/types/backend-types";
+import { eurToCents, formatCurrency } from "@/lib/utils";
 import { AlertCircle, Info, Save, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -53,6 +53,7 @@ export default function TextualInput() {
     const newTransactions: ParsedTransaction[] = [];
     const newErrors: string[] = [];
 
+    // Split by sentences (period, newline, or semicolon)
     const sentences = text.split(/[.\n;]+/).filter((s) => s.trim());
 
     sentences.forEach((sentence, idx) => {
@@ -84,6 +85,7 @@ export default function TextualInput() {
   const parseSentence = (sentence: string): ParsedTransaction[] => {
     const transactions: ParsedTransaction[] = [];
 
+    // Parse date keywords
     let date = new Date();
     if (sentence.includes("danas")) {
       date = new Date();
@@ -92,6 +94,7 @@ export default function TextualInput() {
       date.setDate(date.getDate() - 1);
     }
 
+    // Parse transaction type
     let transactionType: TransactionType | null = null;
     if (sentence.includes("prihod")) {
       transactionType = TransactionType.prihod;
@@ -99,13 +102,17 @@ export default function TextualInput() {
       transactionType = TransactionType.rashod;
     }
 
-    if (!transactionType) return [];
+    if (!transactionType) {
+      return [];
+    }
 
+    // Check if this is an expense with descriptive breakdown
     const hasBreakdownKeywords =
       transactionType === TransactionType.rashod &&
       (/od\s+toga|uključuje/i.test(sentence) ||
         /,\s*\w+\s+\d+(?:[.,]\d+)?(?:\s*(?:eur(?:a)?|€))?/i.test(sentence));
 
+    // Parse expense category
     let expenseCategory: ExpenseCategory | undefined;
 
     if (transactionType === TransactionType.rashod) {
@@ -127,10 +134,12 @@ export default function TextualInput() {
       }
     }
 
+    // Parse amounts and payment methods
     const amountPattern =
       /(\d+(?:[.,]\d+)?)(?:\s*(?:eur(?:a)?|€))?(?:\s+(gotovina|kartica))?/gi;
     const matches = Array.from(sentence.matchAll(amountPattern));
 
+    // Filter matches to only include those that are likely amounts
     const validMatches = matches.filter((match) => {
       const beforeMatch = sentence.substring(0, match.index || 0);
       return (
@@ -142,8 +151,11 @@ export default function TextualInput() {
       );
     });
 
-    if (validMatches.length === 0) return [];
+    if (validMatches.length === 0) {
+      return [];
+    }
 
+    // For expenses with breakdown keywords, create ONE transaction with concatenated description
     if (hasBreakdownKeywords && validMatches.length > 1) {
       const totalAmountStr = validMatches[0][1].replace(",", ".");
       const totalAmount = Number.parseFloat(totalAmountStr);
@@ -151,10 +163,11 @@ export default function TextualInput() {
 
       let paymentMethod: PaymentMethod | undefined;
       if (mainPaymentMethod) {
-        if (mainPaymentMethod.includes("gotovina"))
+        if (mainPaymentMethod.includes("gotovina")) {
           paymentMethod = PaymentMethod.gotovina;
-        else if (mainPaymentMethod.includes("kartica"))
+        } else if (mainPaymentMethod.includes("kartica")) {
           paymentMethod = PaymentMethod.kartica;
+        }
       }
 
       const breakdownParts: string[] = [];
@@ -177,9 +190,13 @@ export default function TextualInput() {
           itemText = itemText.replace(/^[,:\-\s]+/, "").trim();
           const parts = itemText.split(",");
           itemText = parts[parts.length - 1].trim();
-          breakdownParts.push(
-            itemText ? `${itemText} ${amount} EUR` : `${amount} EUR`,
-          );
+
+          if (itemText) {
+            breakdownParts.push(`${itemText} ${amount} EUR`);
+          } else {
+            breakdownParts.push(`${amount} EUR`);
+          }
+
           breakdownText = breakdownText.substring(
             amountIndex + match[0].length,
           );
@@ -190,8 +207,10 @@ export default function TextualInput() {
         ? getCategoryDisplayName(expenseCategory)
         : "Ostalo";
       let description = categoryName;
-      if (breakdownParts.length > 0)
+
+      if (breakdownParts.length > 0) {
         description += `: ${breakdownParts.join(", ")}`;
+      }
 
       transactions.push({
         id: `${Date.now()}-${Math.random()}`,
@@ -203,6 +222,7 @@ export default function TextualInput() {
         description,
       });
     } else {
+      // Standard parsing: create separate transactions for each amount
       validMatches.forEach((match, matchIndex) => {
         const amountStr = match[1].replace(",", ".");
         const amount = Number.parseFloat(amountStr);
@@ -210,10 +230,11 @@ export default function TextualInput() {
 
         let paymentMethod: PaymentMethod | undefined;
         if (paymentMethodStr) {
-          if (paymentMethodStr.includes("gotovina"))
+          if (paymentMethodStr.includes("gotovina")) {
             paymentMethod = PaymentMethod.gotovina;
-          else if (paymentMethodStr.includes("kartica"))
+          } else if (paymentMethodStr.includes("kartica")) {
             paymentMethod = PaymentMethod.kartica;
+          }
         }
 
         let description = "";
@@ -231,13 +252,16 @@ export default function TextualInput() {
           const commaPattern =
             /,\s*([a-zčćžšđA-ZČĆŽŠĐ]+(?:\s+[a-zčćžšđA-ZČĆŽŠĐ]+)*?)(?=\s*\d|$)/i;
           const commaMatch = afterAmount.match(commaPattern);
-          if (commaMatch) extractedText = commaMatch[1].trim();
+          if (commaMatch) {
+            extractedText = commaMatch[1].trim();
+          }
         }
 
         if (transactionType === TransactionType.rashod) {
           const categoryName = expenseCategory
             ? getCategoryDisplayName(expenseCategory)
             : "Ostalo";
+
           if (extractedText) {
             extractedText =
               extractedText.charAt(0).toUpperCase() + extractedText.slice(1);
@@ -308,11 +332,10 @@ export default function TextualInput() {
     for (const transaction of parsedTransactions) {
       try {
         const input: TransactionInput = {
-          // amount must be bigint per TransactionInput
-          amount: eurToCentsBigInt(transaction.amount),
+          amount: eurToCents(transaction.amount),
           transactionType: transaction.transactionType,
-          expenseCategory: transaction.expenseCategory || null,
-          paymentMethod: transaction.paymentMethod || null,
+          expenseCategory: transaction.expenseCategory,
+          paymentMethod: transaction.paymentMethod,
           date: BigInt(transaction.date.getTime() * 1000000),
           description: transaction.description,
         };
@@ -422,8 +445,9 @@ export default function TextualInput() {
                 <AlertDescription>
                   <strong className="text-sm">Greške:</strong>
                   <ul className="mt-2 space-y-1 text-xs">
-                    {errors.map((error) => (
-                      <li key={error}>• {error}</li>
+                    {errors.map((error, idx) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: error list, index key is safe
+                      <li key={idx}>• {error}</li>
                     ))}
                   </ul>
                 </AlertDescription>
@@ -473,9 +497,7 @@ export default function TextualInput() {
                                   : "Rashod"}
                               </Badge>
                               <span className="text-sm sm:text-base font-semibold">
-                                {formatCurrency(
-                                  Math.round(transaction.amount * 100),
-                                )}
+                                {formatCurrency(transaction.amount)}
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -507,7 +529,7 @@ export default function TextualInput() {
                             variant="ghost"
                             size="icon"
                             onClick={() => removeTransaction(transaction.id)}
-                            className="h-8 w-8 shrink-0"
+                            className="h-8 w-8 flex-shrink-0"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -519,20 +541,14 @@ export default function TextualInput() {
 
                 <Button
                   onClick={saveAllTransactions}
-                  className="w-full"
                   disabled={addTransactionMutation.isPending || isReadOnly}
+                  className="w-full"
+                  size="lg"
                 >
-                  {addTransactionMutation.isPending ? (
-                    <>
-                      <Save className="mr-2 h-4 w-4 animate-spin" />
-                      Spremanje...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="mr-2 h-4 w-4" />
-                      Spremi sve transakcije ({parsedTransactions.length})
-                    </>
-                  )}
+                  <Save className="mr-2 h-4 w-4" />
+                  {addTransactionMutation.isPending
+                    ? "Spremanje..."
+                    : `Spremi sve transakcije (${parsedTransactions.length})`}
                 </Button>
               </div>
             )}

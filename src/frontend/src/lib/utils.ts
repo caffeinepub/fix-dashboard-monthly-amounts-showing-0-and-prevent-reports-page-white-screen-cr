@@ -6,31 +6,27 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-// Currency conversion: backend stores amounts in cents (integers)
-export function centsToEur(cents: bigint | number): number {
-  const n = typeof cents === "bigint" ? Number(cents) : cents;
-  return n / 100;
+// Currency conversion: backend stores amounts in cents (integer)
+export function centsToEur(cents: bigint | number | undefined | null): number {
+  if (cents === undefined || cents === null) return 0;
+  const c = typeof cents === "bigint" ? Number(cents) : cents;
+  return c / 100;
 }
 
-export function eurToCents(eur: number): number {
-  return Math.round(eur * 100);
-}
-
-export function eurToCentsBigInt(eur: number): bigint {
+export function eurToCents(eur: number): bigint {
   return BigInt(Math.round(eur * 100));
 }
 
-export function formatCurrency(eur: number | bigint): string {
-  const n = typeof eur === "bigint" ? Number(eur) : eur;
+export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("hr-HR", {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(n);
+  }).format(amount);
 }
 
-export const CROATIAN_MONTHS = [
+export const MONTH_NAMES = [
   "Siječanj",
   "Veljača",
   "Ožujak",
@@ -45,9 +41,28 @@ export const CROATIAN_MONTHS = [
   "Prosinac",
 ];
 
+export const CROATIAN_MONTHS = MONTH_NAMES;
+
 export function getMonthName(monthIndex: number): string {
-  return CROATIAN_MONTHS[monthIndex] ?? `Mjesec ${monthIndex + 1}`;
+  return MONTH_NAMES[monthIndex] ?? "";
 }
 
-// Alias for backward compatibility
-export const MONTH_NAMES = CROATIAN_MONTHS;
+// Returns start-of-month timestamp in nanoseconds (ICP uses nanoseconds)
+export function getMonthStartTimestamp(month: number, year: number): bigint {
+  const date = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  return BigInt(date.getTime()) * BigInt(1_000_000);
+}
+
+// Returns end-of-month timestamp in nanoseconds (last millisecond of last day)
+export function getMonthEndTimestamp(month: number, year: number): bigint {
+  const date = new Date(year, month, 0, 23, 59, 59, 999);
+  return BigInt(date.getTime()) * BigInt(1_000_000);
+}
+
+export function formatDate(timestampNs: bigint | number): string {
+  const ms =
+    typeof timestampNs === "bigint"
+      ? Number(timestampNs) / 1_000_000
+      : timestampNs / 1_000_000;
+  return new Date(ms).toLocaleDateString("hr-HR");
+}

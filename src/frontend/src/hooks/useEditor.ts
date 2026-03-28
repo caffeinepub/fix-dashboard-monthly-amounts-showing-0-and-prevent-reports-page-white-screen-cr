@@ -1,3 +1,5 @@
+/* eslint-disable */
+
 type EditCommunicatorToParentMessage =
   | {
       type: "element-selection";
@@ -111,13 +113,14 @@ function clearBadges(): void {
   const badges = document.querySelectorAll<HTMLElement>(
     '[data-editor-badge="1"]',
   );
-  for (const badge of Array.from(badges)) {
+  // biome-ignore lint/complexity/noForEach: DOM NodeList forEach is fine here
+  badges.forEach((badge) => {
     const parent = badge.parentElement as HTMLElement | null;
     badge.remove();
     if (parent) {
       parent.classList.remove("editor-selected-badged");
     }
-  }
+  });
 }
 
 /**
@@ -223,9 +226,10 @@ export class EditCommunicator {
 
   #clearAllSelections(): void {
     const allElements = document.querySelectorAll(".editor-selected");
-    for (const element of Array.from(allElements)) {
+    // biome-ignore lint/complexity/noForEach: DOM NodeList forEach is fine here
+    allElements.forEach((element) => {
       element.classList.remove("editor-selected");
-    }
+    });
     this.#selectedElements.clear();
     clearBadges();
   }
@@ -274,7 +278,8 @@ export class EditCommunicator {
     ): HTMLElement => {
       const clonedParent = parent.cloneNode(false) as HTMLElement;
 
-      for (const child of Array.from(parent.children)) {
+      // biome-ignore lint/complexity/noForEach: DOM NodeList forEach is fine here
+      Array.from(parent.children).forEach((child) => {
         const childElement = child as HTMLElement;
 
         if (remainingPath.length > 0 && childElement === remainingPath[0]) {
@@ -292,7 +297,7 @@ export class EditCommunicator {
           this.#removeArtificialElements(clonedChild);
           clonedParent.appendChild(clonedChild);
         }
-      }
+      });
 
       this.#removeArtificialElements(clonedParent);
       return clonedParent;
@@ -304,7 +309,8 @@ export class EditCommunicator {
 
   #removeArtificialElements(element: HTMLElement): void {
     const badges = element.querySelectorAll('[data-editor-badge="1"]');
-    for (const badge of Array.from(badges)) badge.remove();
+    // biome-ignore lint/complexity/noForEach: DOM NodeList forEach is fine here
+    badges.forEach((badge) => badge.remove());
 
     element.classList.remove(
       "editor-selected",
@@ -381,9 +387,9 @@ export class EditCommunicator {
     const target = e.target as HTMLElement;
 
     const allElements = document.querySelectorAll(".editor-hover");
-    for (const element of Array.from(allElements)) {
+    allElements.forEach((element) => {
       element.classList.remove("editor-hover");
-    }
+    });
 
     target.classList.add("editor-hover");
   }
@@ -404,14 +410,14 @@ export class EditCommunicator {
     const matched: string[] = [];
 
     const elements = document.querySelectorAll<HTMLElement>("*");
-    for (const el of Array.from(elements)) {
+    elements.forEach((el) => {
       const domTreeString = this.#generateDOMTreeString(el);
       const id = hashDomTreeString(domTreeString);
       if (wanted.has(id)) {
         this.#addSelection(id, el, domTreeString);
         matched.push(id);
       }
-    }
+    });
 
     const selectedElements = Array.from(this.#selectedElements.values()).map(
       ({ id, domTreeString }) => ({

@@ -1,8 +1,3 @@
-import {
-  clearConnectionFailure,
-  setConnectionFailure,
-} from "@/state/connectionRecoveryStore";
-import type { ExtendedBackendInterface } from "@/types/backend-types";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -21,7 +16,6 @@ const RELAYER_SYNC_TIMEOUT = 5000;
  * automatic relayer synchronization, and full communication chain verification.
  * Automatically detects when backend becomes idle, unresponsive, or canister ID changes.
  * Triggers automatic resynchronization with full actor binding refresh and relayer activation.
- * Publishes connection failures to connectionRecoveryStore for UI recovery components.
  */
 export function useConnectionMonitor() {
   const { actor } = useActor();
@@ -44,8 +38,6 @@ export function useConnectionMonitor() {
       if (!actor) return false;
 
       try {
-        const extendedActor = actor as unknown as ExtendedBackendInterface;
-
         // Step 1: Wake up backend with anonymous health check
         if (!backendWokenUpRef.current) {
           const timeoutPromise = new Promise<never>((_, reject) => {
@@ -55,7 +47,7 @@ export function useConnectionMonitor() {
             );
           });
 
-          const wakeUpPromise = extendedActor.getCurrentTime();
+          const wakeUpPromise = actor.getCurrentTime();
           await Promise.race([wakeUpPromise, timeoutPromise]);
 
           backendWokenUpRef.current = true;
@@ -70,7 +62,7 @@ export function useConnectionMonitor() {
             );
           });
 
-          const relayerSyncPromise = extendedActor.getCurrentTime();
+          const relayerSyncPromise = actor.getCurrentTime();
           await Promise.race([relayerSyncPromise, relayerTimeoutPromise]);
 
           relayerSyncedRef.current = true;
@@ -144,28 +136,11 @@ export function useConnectionMonitor() {
         setTimeout(() => reject(new Error("Connection timeout")), PING_TIMEOUT);
       });
 
-      const extendedActor = actor as unknown as ExtendedBackendInterface;
-      await Promise.race([extendedActor.getCurrentTime(), timeoutPromise]);
+      await Promise.race([actor.getCurrentTime(), timeoutPromise]);
       lastSuccessfulPingRef.current = Date.now();
       return true;
-    } catch (error: any) {
+    } catch (error) {
       console.error("Connection check failed:", error);
-
-      // Classify error to determine if it's likely a canister ID mismatch
-      const isLikelyMismatch =
-        error?.message?.includes("Canister") ||
-        error?.message?.includes("canister") ||
-        error?.message?.includes("not found") ||
-        error?.message?.includes("does not exist") ||
-        error?.message?.includes("Invalid canister");
-
-      if (isLikelyMismatch) {
-        setConnectionFailure(
-          "Backend canister nije dostupan. Ovo može biti uzrokovano starim canister ID-om.",
-          true,
-        );
-      }
-
       return false;
     }
   }, [actor, wakeUpBackendAndSyncRelayer]);
@@ -179,9 +154,6 @@ export function useConnectionMonitor() {
       toast.dismiss(toastIdRef.current);
       toastIdRef.current = null;
     }
-
-    // Clear recovery state
-    clearConnectionFailure();
 
     toast.success("Veza uspostavljena", {
       description:
@@ -202,13 +174,6 @@ export function useConnectionMonitor() {
         if (toastIdRef.current) {
           toast.dismiss(toastIdRef.current);
         }
-
-        // Set persistent recovery state for UI banner
-        setConnectionFailure(
-          "Nije moguće uspostaviti vezu nakon više pokušaja. Provjerite je li backend canister ID ažuran.",
-          true,
-        );
-
         toast.error("Nije moguće uspostaviti vezu", {
           description:
             'Kliknite gumb "Resinkroniziraj" u headeru ili osvježite stranicu (F5). Provjerite je li backend canister ID ažuran i relayer dostupan.',

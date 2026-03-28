@@ -22,8 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  useGetCallerBusinessProfile,
-  useSaveCallerBusinessProfile,
+  useGetBusinessProfile,
+  useSaveBusinessProfile,
 } from "@/hooks/useQueries";
 import { useReadOnlyMode } from "@/hooks/useReadOnlyMode";
 import {
@@ -40,8 +40,8 @@ import { toast } from "sonner";
 
 export default function BusinessProfile() {
   const { isReadOnly } = useReadOnlyMode();
-  const { data: profile, isLoading } = useGetCallerBusinessProfile();
-  const saveProfileMutation = useSaveCallerBusinessProfile();
+  const { data: profile, isLoading } = useGetBusinessProfile();
+  const saveProfileMutation = useSaveBusinessProfile();
 
   const [location, setLocation] = useState("");
   const [numberOfSeats, setNumberOfSeats] = useState("");
@@ -98,7 +98,7 @@ export default function BusinessProfile() {
     try {
       await saveProfileMutation.mutateAsync(profileData);
       toast.success("Profil objekta uspješno spremljen");
-    } catch {
+    } catch (_error) {
       toast.error("Greška pri spremanju profila objekta");
     }
   };

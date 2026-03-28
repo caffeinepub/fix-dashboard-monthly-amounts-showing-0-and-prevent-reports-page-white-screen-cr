@@ -1,14 +1,14 @@
-import { useGetReadOnlyMode } from "./useQueries";
+import { useCheckReadOnlyAccess } from "./useQueries";
 
 /**
- * Hook to check if the application is in read-only mode.
- * Read-only mode allows draft environment to access production data without modification capabilities.
+ * Hook to check if the application is in read-only mode
+ * Read-only mode allows draft environment to access production data without modification capabilities
  */
 export function useReadOnlyMode() {
-  const { data: hasReadOnlyAccess, isLoading } = useGetReadOnlyMode();
+  const { data: hasReadOnlyAccess, isLoading } = useCheckReadOnlyAccess();
 
   return {
-    isReadOnly: hasReadOnlyAccess ?? false,
+    isReadOnly: hasReadOnlyAccess || false,
     isLoading,
   };
 }

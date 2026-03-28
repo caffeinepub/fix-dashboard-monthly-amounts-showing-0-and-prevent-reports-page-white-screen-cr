@@ -1,3 +1,4 @@
+import { ExpenseCategory, type Transaction, TransactionType } from "@/backend";
 import TransactionDialog from "@/components/TransactionDialog";
 import {
   AlertDialog,
@@ -31,11 +32,6 @@ import {
   useGetAllTransactions,
 } from "@/hooks/useQueries";
 import { formatCurrency } from "@/lib/utils";
-import {
-  ExpenseCategory,
-  type Transaction,
-  TransactionType,
-} from "@/types/backend-types";
 import {
   Calendar,
   Edit,
@@ -197,9 +193,7 @@ export default function Transactions() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Type Filter */}
               <div className="space-y-2">
-                <label htmlFor="filter-type" className="text-sm font-medium">
-                  Tip transakcije
-                </label>
+                <label className="text-sm font-medium">Tip transakcije</label>
                 <Select value={filterType} onValueChange={setFilterType}>
                   <SelectTrigger>
                     <SelectValue placeholder="Svi tipovi" />
@@ -218,10 +212,7 @@ export default function Transactions() {
 
               {/* Category Filter */}
               <div className="space-y-2">
-                <label
-                  htmlFor="filter-category"
-                  className="text-sm font-medium"
-                >
+                <label className="text-sm font-medium">
                   Kategorija rashoda
                 </label>
                 <Select
@@ -273,8 +264,9 @@ export default function Transactions() {
         <CardContent>
           {isLoading ? (
             <div className="space-y-3">
-              {["a", "b", "c", "d", "e"].map((k) => (
-                <Skeleton key={k} className="h-16 sm:h-20 w-full" />
+              {[...Array(5)].map((_, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list
+                <Skeleton key={i} className="h-16 sm:h-20 w-full" />
               ))}
             </div>
           ) : sortedTransactions.length > 0 ? (
