@@ -193,7 +193,7 @@ export default function Transactions() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Type Filter */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Tip transakcije</label>
+                <span className="text-sm font-medium">Tip transakcije</span>
                 <Select value={filterType} onValueChange={setFilterType}>
                   <SelectTrigger>
                     <SelectValue placeholder="Svi tipovi" />
@@ -212,9 +212,7 @@ export default function Transactions() {
 
               {/* Category Filter */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  Kategorija rashoda
-                </label>
+                <span className="text-sm font-medium">Kategorija rashoda</span>
                 <Select
                   value={filterCategory}
                   onValueChange={setFilterCategory}

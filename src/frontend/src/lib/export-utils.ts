@@ -130,7 +130,7 @@ export function exportToCSV(data: ExportData): string {
 
   let csv = "Type,Amount (EUR),Category,Payment Method,Date,Description\n";
 
-  transactions.forEach((t) => {
+  for (const t of transactions) {
     const amount = centsToEur(t.amount).toFixed(2);
     const type = t.transactionType === "prihod" ? "Income" : "Expense";
     const category = t.expenseCategory || "";
@@ -139,13 +139,13 @@ export function exportToCSV(data: ExportData): string {
     const description = t.description || "";
 
     csv += `${type},${amount},${category},${paymentMethod},${date},"${description}"\n`;
-  });
+  }
 
-  monthlyIncomes.forEach((mi) => {
+  for (const mi of monthlyIncomes) {
     const amount = centsToEur(mi.amount).toFixed(2);
     const monthName = MONTH_NAMES[Number(mi.month) - 1];
     csv += `Monthly Income,${amount},,,"${monthName} ${mi.year}","Quick monthly income entry"\n`;
-  });
+  }
 
   return csv;
 }

@@ -1,3 +1,4 @@
+import { PaymentMethod, TransactionType } from "@/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,16 +22,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useExportData,
+  useGetAllTransactions,
   useGetBusinessPerformanceAnalysis,
   useGetBusinessProfile,
   useGetCallerUserProfile,
-  useGetExpenseShareByCategory,
-  useGetMonthlyIncomeExpenseByYear,
-  useGetMonthlyReport,
   useGetPdfFinancialReportDataByYear,
   useGetPredictiveAnalysis,
-  useGetYearComparison,
-  useGetYearlyReport,
   useRunSimulation,
 } from "@/hooks/useQueries";
 import { exportToPDFByYear } from "@/lib/export-utils";
@@ -97,14 +94,10 @@ export default function Reports() {
   const [analysisMonth, setAnalysisMonth] = useState(currentMonth);
   const [analysisYear, setAnalysisYear] = useState(currentYear);
 
-  const { data: monthlyReport, isLoading: monthlyLoading } =
-    useGetMonthlyReport(selectedMonth, selectedYear);
-  const { data: yearlyReport, isLoading: yearlyLoading } =
-    useGetYearlyReport(yearlyReportYear);
-  const { data: monthlyIncomeExpense, isLoading: monthlyIncomeExpenseLoading } =
-    useGetMonthlyIncomeExpenseByYear(selectedYear);
-  const { data: yearComparison, isLoading: yearComparisonLoading } =
-    useGetYearComparison(comparisonYears);
+  // Single source of truth: all transactions from backend
+  const { data: allTransactions, isLoading: allTransactionsLoading } =
+    useGetAllTransactions();
+
   const { data: userProfile } = useGetCallerUserProfile();
   const { data: businessProfile } = useGetBusinessProfile();
   const { data: predictiveData, isLoading: predictiveLoading } =
@@ -113,7 +106,7 @@ export default function Reports() {
   const getPdfDataMutation = useGetPdfFinancialReportDataByYear();
   const runSimulationMutation = useRunSimulation();
 
-  // Business performance analysis query with proper parameters
+  // Business performance analysis query
   const {
     data: performanceAnalysis,
     isLoading: performanceLoading,
@@ -124,28 +117,152 @@ export default function Reports() {
     analysisPeriod !== "cumulative" ? analysisYear : undefined,
   );
 
-  const { startDate, endDate } = useMemo(() => {
-    return {
-      startDate: getMonthStartTimestamp(selectedMonth, selectedYear),
-      endDate: getMonthEndTimestamp(selectedMonth, selectedYear),
-    };
-  }, [selectedMonth, selectedYear]);
-
-  const { data: expenseShare, isLoading: expenseShareLoading } =
-    useGetExpenseShareByCategory(startDate, endDate);
-
   const years = Array.from({ length: 10 }, (_, i) => currentYear - i);
 
-  const monthlyIncomeExpenseChartData = monthlyIncomeExpense
-    ? monthlyIncomeExpense.map((data) => ({
-        name: getMonthName(Number(data.month) - 1).substring(0, 3),
-        Prihodi: centsToEur(data.totalIncome),
-        Rashodi: centsToEur(data.totalExpenses),
-      }))
-    : [];
+  // ── Client-side computed monthly data ────────────────────────────────────
+  const monthlyData = useMemo(() => {
+    if (!allTransactions) return null;
+    const start = getMonthStartTimestamp(selectedMonth, selectedYear);
+    const end = getMonthEndTimestamp(selectedMonth, selectedYear);
+    const txns = allTransactions.filter(
+      (t) => t.date >= start && t.date <= end,
+    );
 
-  const yearlyChartData = yearlyReport
-    ? yearlyReport.monthlyOverviews.map((overview, index) => ({
+    if (txns.length === 0) return null;
+
+    let totalIncome = BigInt(0);
+    let totalExpenses = BigInt(0);
+    let cashIncome = BigInt(0);
+    let cardIncome = BigInt(0);
+    const expenseMap: Record<string, bigint> = {};
+
+    for (const t of txns) {
+      if (t.transactionType === TransactionType.prihod) {
+        totalIncome += t.amount;
+        if (t.paymentMethod === PaymentMethod.gotovina) cashIncome += t.amount;
+        else if (t.paymentMethod === PaymentMethod.kartica)
+          cardIncome += t.amount;
+      } else {
+        totalExpenses += t.amount;
+        expenseMap[t.expenseCategory ?? "ostalo"] =
+          (expenseMap[t.expenseCategory ?? "ostalo"] ?? BigInt(0)) + t.amount;
+      }
+    }
+
+    return {
+      overview: {
+        totalIncome,
+        totalExpenses,
+        profit: totalIncome - totalExpenses,
+      },
+      incomeByPaymentMethod: [
+        { paymentMethod: "Gotovina", total: cashIncome },
+        { paymentMethod: "Kartica", total: cardIncome },
+      ].filter((pm) => pm.total > BigInt(0)),
+      expensesByCategory: Object.entries(expenseMap)
+        .map(([category, total]) => ({ category, total }))
+        .sort((a, b) => Number(b.total - a.total)),
+      expenseShareData: Object.entries(expenseMap)
+        .map(([category, total]) => ({
+          name: category,
+          value: centsToEur(total),
+          share:
+            totalExpenses > BigInt(0)
+              ? Number(total) / Number(totalExpenses)
+              : 0,
+        }))
+        .filter((item) => item.value > 0),
+    };
+  }, [allTransactions, selectedMonth, selectedYear]);
+
+  // ── Client-side computed yearly data ────────────────────────────────────
+  const yearlyData = useMemo(() => {
+    if (!allTransactions) return null;
+    const monthlyOverviews = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const start = getMonthStartTimestamp(m, yearlyReportYear);
+      const end = getMonthEndTimestamp(m, yearlyReportYear);
+      const txns = allTransactions.filter(
+        (t) => t.date >= start && t.date <= end,
+      );
+      let totalIncome = BigInt(0);
+      let totalExpenses = BigInt(0);
+      let cashIncome = BigInt(0);
+      let cardIncome = BigInt(0);
+      for (const t of txns) {
+        if (t.transactionType === TransactionType.prihod) {
+          totalIncome += t.amount;
+          if (t.paymentMethod === PaymentMethod.gotovina)
+            cashIncome += t.amount;
+          else cardIncome += t.amount;
+        } else totalExpenses += t.amount;
+      }
+      return {
+        totalIncome,
+        totalExpenses,
+        profit: totalIncome - totalExpenses,
+        cashIncome,
+        cardIncome,
+      };
+    });
+    const totalIncome = monthlyOverviews.reduce(
+      (s, m) => s + m.totalIncome,
+      BigInt(0),
+    );
+    const totalExpenses = monthlyOverviews.reduce(
+      (s, m) => s + m.totalExpenses,
+      BigInt(0),
+    );
+    const cashIncome = monthlyOverviews.reduce(
+      (s, m) => s + m.cashIncome,
+      BigInt(0),
+    );
+    const cardIncome = monthlyOverviews.reduce(
+      (s, m) => s + m.cardIncome,
+      BigInt(0),
+    );
+    if (totalIncome === BigInt(0) && totalExpenses === BigInt(0)) return null;
+    return {
+      totalOverview: {
+        totalIncome,
+        totalExpenses,
+        profit: totalIncome - totalExpenses,
+      },
+      incomeByPaymentMethod: [
+        { paymentMethod: "Gotovina", total: cashIncome },
+        { paymentMethod: "Kartica", total: cardIncome },
+      ].filter((pm) => pm.total > BigInt(0)),
+      monthlyOverviews,
+    };
+  }, [allTransactions, yearlyReportYear]);
+
+  // ── Monthly income/expense chart for the selected year (monthly tab) ───
+  const monthlyIncomeExpenseChartData = useMemo(() => {
+    if (!allTransactions) return [];
+    return Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const start = getMonthStartTimestamp(m, selectedYear);
+      const end = getMonthEndTimestamp(m, selectedYear);
+      const txns = allTransactions.filter(
+        (t) => t.date >= start && t.date <= end,
+      );
+      let income = BigInt(0);
+      let expenses = BigInt(0);
+      for (const t of txns) {
+        if (t.transactionType === TransactionType.prihod) income += t.amount;
+        else expenses += t.amount;
+      }
+      return {
+        name: getMonthName(i).substring(0, 3),
+        Prihodi: centsToEur(income),
+        Rashodi: centsToEur(expenses),
+      };
+    });
+  }, [allTransactions, selectedYear]);
+
+  // ── Yearly chart data (yearly tab bar chart) ───────────────────────────
+  const yearlyChartData = yearlyData
+    ? yearlyData.monthlyOverviews.map((overview, index) => ({
         name: getMonthName(index).substring(0, 3),
         Prihodi: centsToEur(overview.totalIncome),
         Rashodi: centsToEur(overview.totalExpenses),
@@ -153,38 +270,56 @@ export default function Reports() {
       }))
     : [];
 
-  const comparisonChartData =
-    yearComparison && yearComparison.length > 0
-      ? MONTH_NAMES.map((_, monthIndex) => {
-          const dataPoint: any = {
-            name: getMonthName(monthIndex).substring(0, 3),
-          };
-          // biome-ignore lint/complexity/noForEach: existing pattern
-          yearComparison.forEach((yearData) => {
-            const monthData = yearData.monthlyData?.[monthIndex];
-            if (!monthData) return;
-            dataPoint[`Prihodi ${yearData.year}`] = centsToEur(
-              monthData.totalIncome,
-            );
-            dataPoint[`Rashodi ${yearData.year}`] = centsToEur(
-              monthData.totalExpenses,
-            );
-          });
-          return dataPoint;
-        })
-      : [];
+  // ── Client-side year comparison data ──────────────────────────────────
+  const yearComparisonData = useMemo(() => {
+    if (!allTransactions || comparisonYears.length < 2) return [];
+    return comparisonYears.map((year) => {
+      const monthly = Array.from({ length: 12 }, (_, i) => {
+        const m = i + 1;
+        const start = getMonthStartTimestamp(m, year);
+        const end = getMonthEndTimestamp(m, year);
+        const txns = allTransactions.filter(
+          (t) => t.date >= start && t.date <= end,
+        );
+        let totalIncome = BigInt(0);
+        let totalExpenses = BigInt(0);
+        for (const t of txns) {
+          if (t.transactionType === TransactionType.prihod)
+            totalIncome += t.amount;
+          else totalExpenses += t.amount;
+        }
+        return { totalIncome, totalExpenses };
+      });
+      const totalIncome = monthly.reduce(
+        (s, m) => s + m.totalIncome,
+        BigInt(0),
+      );
+      const totalExpenses = monthly.reduce(
+        (s, m) => s + m.totalExpenses,
+        BigInt(0),
+      );
+      return { year, totalIncome, totalExpenses, monthlyData: monthly };
+    });
+  }, [allTransactions, comparisonYears]);
 
-  const doughnutChartData = expenseShare
-    ? expenseShare
-        .filter((item) => Number(item.total) > 0)
-        .map((item) => ({
-          name: item.category,
-          value: centsToEur(item.total),
-          share: item.share,
-        }))
-    : [];
+  const comparisonChartData = useMemo(() => {
+    if (yearComparisonData.length === 0) return [];
+    return MONTH_NAMES.map((_, monthIndex) => {
+      const dataPoint: Record<string, string | number> = {
+        name: getMonthName(monthIndex).substring(0, 3),
+      };
+      // biome-ignore lint/complexity/noForEach: existing pattern
+      yearComparisonData.forEach((yearData) => {
+        const md = yearData.monthlyData?.[monthIndex];
+        if (!md) return;
+        dataPoint[`Prihodi ${yearData.year}`] = centsToEur(md.totalIncome);
+        dataPoint[`Rashodi ${yearData.year}`] = centsToEur(md.totalExpenses);
+      });
+      return dataPoint;
+    });
+  }, [yearComparisonData]);
 
-  // Predictive analysis chart data
+  // ── Predictive analysis chart data ────────────────────────────────────
   const projectionsToUse =
     simulationResult?.projections || predictiveData?.projections || [];
   const predictiveChartData = projectionsToUse.map((proj: any) => ({
@@ -194,7 +329,7 @@ export default function Reports() {
     "Predviđena dobit": centsToEur(proj.projectedProfit),
   }));
 
-  // Business performance analysis chart data - using expenseDeviations from backend
+  // Business performance analysis chart data
   const performanceChartData =
     performanceAnalysis?.expenseDeviations?.map((deviation: any) => ({
       name: deviation.category,
@@ -288,6 +423,8 @@ export default function Reports() {
     return <Badge variant="secondary">U prosjeku</Badge>;
   };
 
+  const isLoading = allTransactionsLoading;
+
   return (
     <div className="container py-8">
       <div className="mb-8 flex items-center justify-between">
@@ -343,6 +480,7 @@ export default function Reports() {
           <TabsTrigger value="performance">Analiza poslovanja</TabsTrigger>
         </TabsList>
 
+        {/* ── MONTHLY TAB ───────────────────────────────────────────────── */}
         <TabsContent value="monthly" className="space-y-6">
           <div className="flex gap-4">
             <Select
@@ -366,7 +504,7 @@ export default function Reports() {
               value={selectedYear.toString()}
               onValueChange={(v) => setSelectedYear(Number(v))}
             >
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-[120px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -379,12 +517,12 @@ export default function Reports() {
             </Select>
           </div>
 
-          {monthlyLoading ? (
+          {isLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-32 w-full" />
               <Skeleton className="h-64 w-full" />
             </div>
-          ) : monthlyReport ? (
+          ) : monthlyData ? (
             <>
               <div className="grid gap-4 md:grid-cols-3">
                 <Card>
@@ -396,7 +534,7 @@ export default function Reports() {
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600">
                       {formatCurrency(
-                        centsToEur(monthlyReport.overview.totalIncome),
+                        centsToEur(monthlyData.overview.totalIncome),
                       )}
                     </div>
                   </CardContent>
@@ -411,7 +549,7 @@ export default function Reports() {
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600">
                       {formatCurrency(
-                        centsToEur(monthlyReport.overview.totalExpenses),
+                        centsToEur(monthlyData.overview.totalExpenses),
                       )}
                     </div>
                   </CardContent>
@@ -426,14 +564,12 @@ export default function Reports() {
                   <CardContent>
                     <div
                       className={`text-2xl font-bold ${
-                        Number(monthlyReport.overview.profit) >= 0
+                        monthlyData.overview.profit >= BigInt(0)
                           ? "text-green-600"
                           : "text-red-600"
                       }`}
                     >
-                      {formatCurrency(
-                        centsToEur(monthlyReport.overview.profit),
-                      )}
+                      {formatCurrency(centsToEur(monthlyData.overview.profit))}
                     </div>
                   </CardContent>
                 </Card>
@@ -449,7 +585,7 @@ export default function Reports() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {monthlyReport.incomeByPaymentMethod.map((pm, index) => (
+                      {monthlyData.incomeByPaymentMethod.map((pm, index) => (
                         <div
                           // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
                           key={index}
@@ -481,7 +617,7 @@ export default function Reports() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {monthlyReport.expensesByCategory.map((cat, index) => (
+                      {monthlyData.expensesByCategory.map((cat, index) => (
                         <div
                           // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
                           key={index}
@@ -509,13 +645,11 @@ export default function Reports() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {expenseShareLoading ? (
-                    <Skeleton className="h-[400px] w-full" />
-                  ) : doughnutChartData.length > 0 ? (
+                  {monthlyData.expenseShareData.length > 0 ? (
                     <ResponsiveContainer width="100%" height={400}>
                       <PieChart>
                         <Pie
-                          data={doughnutChartData}
+                          data={monthlyData.expenseShareData}
                           cx="50%"
                           cy="50%"
                           labelLine={false}
@@ -525,7 +659,7 @@ export default function Reports() {
                           fill="#8884d8"
                           dataKey="value"
                         >
-                          {doughnutChartData.map((_entry, index) => (
+                          {monthlyData.expenseShareData.map((_entry, index) => (
                             <Cell
                               // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
                               key={`cell-${index}`}
@@ -563,31 +697,27 @@ export default function Reports() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  {monthlyIncomeExpenseLoading ? (
-                    <Skeleton className="h-[300px] w-full" />
-                  ) : (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={monthlyIncomeExpenseChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip
-                          formatter={(value) => formatCurrency(Number(value))}
-                        />
-                        <Legend />
-                        <Bar
-                          dataKey="Prihodi"
-                          fill="hsl(142, 76%, 36%)"
-                          name="Prihodi"
-                        />
-                        <Bar
-                          dataKey="Rashodi"
-                          fill="hsl(0, 84%, 60%)"
-                          name="Rashodi"
-                        />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={monthlyIncomeExpenseChartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip
+                        formatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Legend />
+                      <Bar
+                        dataKey="Prihodi"
+                        fill="hsl(142, 76%, 36%)"
+                        name="Prihodi"
+                      />
+                      <Bar
+                        dataKey="Rashodi"
+                        fill="hsl(0, 84%, 60%)"
+                        name="Rashodi"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </CardContent>
               </Card>
             </>
@@ -600,6 +730,7 @@ export default function Reports() {
           )}
         </TabsContent>
 
+        {/* ── YEARLY TAB ────────────────────────────────────────────────── */}
         <TabsContent value="yearly" className="space-y-6">
           <div className="flex gap-4">
             <Select
@@ -619,12 +750,12 @@ export default function Reports() {
             </Select>
           </div>
 
-          {yearlyLoading ? (
+          {isLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-32 w-full" />
               <Skeleton className="h-96 w-full" />
             </div>
-          ) : yearlyReport ? (
+          ) : yearlyData ? (
             <>
               <div className="grid gap-4 md:grid-cols-3">
                 <Card>
@@ -636,7 +767,7 @@ export default function Reports() {
                   <CardContent>
                     <div className="text-2xl font-bold text-green-600">
                       {formatCurrency(
-                        centsToEur(yearlyReport.totalOverview.totalIncome),
+                        centsToEur(yearlyData.totalOverview.totalIncome),
                       )}
                     </div>
                   </CardContent>
@@ -651,7 +782,7 @@ export default function Reports() {
                   <CardContent>
                     <div className="text-2xl font-bold text-red-600">
                       {formatCurrency(
-                        centsToEur(yearlyReport.totalOverview.totalExpenses),
+                        centsToEur(yearlyData.totalOverview.totalExpenses),
                       )}
                     </div>
                   </CardContent>
@@ -666,13 +797,13 @@ export default function Reports() {
                   <CardContent>
                     <div
                       className={`text-2xl font-bold ${
-                        Number(yearlyReport.totalOverview.profit) >= 0
+                        yearlyData.totalOverview.profit >= BigInt(0)
                           ? "text-green-600"
                           : "text-red-600"
                       }`}
                     >
                       {formatCurrency(
-                        centsToEur(yearlyReport.totalOverview.profit),
+                        centsToEur(yearlyData.totalOverview.profit),
                       )}
                     </div>
                   </CardContent>
@@ -688,7 +819,7 @@ export default function Reports() {
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-4 md:grid-cols-2">
-                    {yearlyReport.incomeByPaymentMethod.map((pm, index) => (
+                    {yearlyData.incomeByPaymentMethod.map((pm, index) => (
                       <div
                         // biome-ignore lint/suspicious/noArrayIndexKey: static list, index key is safe
                         key={index}
@@ -759,6 +890,7 @@ export default function Reports() {
           )}
         </TabsContent>
 
+        {/* ── COMPARISON TAB ────────────────────────────────────────────── */}
         <TabsContent value="comparison" className="space-y-6">
           <Card>
             <CardHeader>
@@ -794,15 +926,15 @@ export default function Reports() {
                 Odaberite najmanje dvije godine za usporedbu
               </CardContent>
             </Card>
-          ) : yearComparisonLoading ? (
+          ) : isLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-32 w-full" />
               <Skeleton className="h-96 w-full" />
             </div>
-          ) : yearComparison && yearComparison.length > 0 ? (
+          ) : yearComparisonData.length > 0 ? (
             <>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {yearComparison.map((yearData) => (
+                {yearComparisonData.map((yearData) => (
                   <Card key={yearData.year}>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-lg">
@@ -830,9 +962,8 @@ export default function Reports() {
                         <span className="text-sm font-medium">Profit:</span>
                         <span
                           className={`text-sm font-bold ${
-                            Number(yearData.totalIncome) -
-                              Number(yearData.totalExpenses) >=
-                            0
+                            yearData.totalIncome - yearData.totalExpenses >=
+                            BigInt(0)
                               ? "text-green-600"
                               : "text-red-600"
                           }`}
@@ -865,7 +996,7 @@ export default function Reports() {
                         formatter={(value) => formatCurrency(Number(value))}
                       />
                       <Legend />
-                      {yearComparison.map((yearData, index) => (
+                      {yearComparisonData.map((yearData, index) => (
                         <Line
                           key={`income-${yearData.year}`}
                           type="monotone"
@@ -897,7 +1028,7 @@ export default function Reports() {
                         formatter={(value) => formatCurrency(Number(value))}
                       />
                       <Legend />
-                      {yearComparison.map((yearData, index) => (
+                      {yearComparisonData.map((yearData, index) => (
                         <Line
                           key={`expense-${yearData.year}`}
                           type="monotone"
@@ -922,6 +1053,7 @@ export default function Reports() {
           )}
         </TabsContent>
 
+        {/* ── PREDICTIVE TAB ────────────────────────────────────────────── */}
         <TabsContent value="predictive" className="space-y-6">
           {predictiveLoading ? (
             <div className="space-y-4">
@@ -1210,6 +1342,7 @@ export default function Reports() {
           )}
         </TabsContent>
 
+        {/* ── PERFORMANCE TAB ───────────────────────────────────────────── */}
         <TabsContent value="performance" className="space-y-6">
           <Card>
             <CardHeader>
@@ -1339,7 +1472,8 @@ export default function Reports() {
                   Greška pri učitavanju analize
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {performanceError.message || "Molimo pokušajte ponovno"}
+                  {(performanceError as Error).message ||
+                    "Molimo pokušajte ponovno"}
                 </p>
               </CardContent>
             </Card>

@@ -167,7 +167,7 @@ export default function DataAnalysis() {
     });
 
     // Compare monthly data
-    pdfData.forEach((pdfMonth) => {
+    for (const pdfMonth of pdfData) {
       const monthIndex = Number.parseInt(pdfMonth.month) - 1;
       if (
         monthIndex >= 0 &&
@@ -231,7 +231,7 @@ export default function DataAnalysis() {
                 : "major",
         });
       }
-    });
+    }
 
     setComparisonResults(results);
   };
@@ -279,23 +279,23 @@ export default function DataAnalysis() {
 
     if (majorIssues.length > 0) {
       report += "VELIKE RAZLIKE (zahtijevaju pažnju):\n";
-      majorIssues.forEach((issue) => {
+      for (const issue of majorIssues) {
         report += `\n${issue.category}:\n`;
         report += `  PDF vrijednost: ${formatCurrency(issue.pdfValue)}\n`;
         report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
         report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
-      });
+      }
       report += "\n";
     }
 
     if (minorIssues.length > 0) {
       report += "MALE RAZLIKE (moguće zaokruživanje):\n";
-      minorIssues.forEach((issue) => {
+      for (const issue of minorIssues) {
         report += `\n${issue.category}:\n`;
         report += `  PDF vrijednost: ${formatCurrency(issue.pdfValue)}\n`;
         report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
         report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
-      });
+      }
       report += "\n";
     }
 
@@ -464,7 +464,7 @@ export default function DataAnalysis() {
                     </TableHeader>
                     <TableBody>
                       {yearlyReport.monthlyOverviews.map((overview, index) => {
-                        const monthNames = [
+                        const allMonthNames = [
                           "Siječanj",
                           "Veljača",
                           "Ožujak",
@@ -478,10 +478,12 @@ export default function DataAnalysis() {
                           "Studeni",
                           "Prosinac",
                         ];
+                        const monthName =
+                          allMonthNames[index] ?? String(index + 1);
                         return (
-                          <TableRow key={index}>
+                          <TableRow key={monthName}>
                             <TableCell className="font-medium">
-                              {monthNames[index]}
+                              {monthName}
                             </TableCell>
                             <TableCell className="text-right text-green-600">
                               {formatCurrency(centsToEur(overview.totalIncome))}
@@ -545,8 +547,8 @@ export default function DataAnalysis() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {comparisonResults.map((result, index) => (
-                      <TableRow key={index}>
+                    {comparisonResults.map((result) => (
+                      <TableRow key={result.category}>
                         <TableCell className="font-medium">
                           {result.category}
                         </TableCell>

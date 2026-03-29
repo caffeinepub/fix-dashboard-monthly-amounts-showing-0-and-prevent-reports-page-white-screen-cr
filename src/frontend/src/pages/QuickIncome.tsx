@@ -73,6 +73,7 @@ export default function QuickIncome() {
     {} as Record<number, number>,
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: selectedYear is the trigger, reset on year change
   useEffect(() => {
     setMonthlyAmounts({});
     setEditingMonths(new Set());

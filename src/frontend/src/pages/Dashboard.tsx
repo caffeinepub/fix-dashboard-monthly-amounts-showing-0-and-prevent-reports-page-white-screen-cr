@@ -1,4 +1,4 @@
-import { type Transaction, TransactionType } from "@/backend";
+import { PaymentMethod, type Transaction, TransactionType } from "@/backend";
 import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import {
   Card,
@@ -9,11 +9,15 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  useGetCurrentMonthOverview,
-  useGetCurrentMonthReport,
+  useGetAllTransactions,
   useGetRecentTransactions,
 } from "@/hooks/useQueries";
-import { centsToEur, formatCurrency } from "@/lib/utils";
+import {
+  centsToEur,
+  formatCurrency,
+  getMonthEndTimestamp,
+  getMonthStartTimestamp,
+} from "@/lib/utils";
 import {
   Banknote,
   Calendar,
@@ -22,39 +26,78 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { useMemo } from "react";
 
 export default function Dashboard() {
   const {
-    data: overview,
-    isLoading: overviewLoading,
-    error: overviewError,
-  } = useGetCurrentMonthOverview();
+    data: allTransactions,
+    isLoading: allLoading,
+    error: allError,
+  } = useGetAllTransactions();
   const {
     data: recentTransactions,
     isLoading: transactionsLoading,
     error: transactionsError,
   } = useGetRecentTransactions();
-  const {
-    data: monthlyReport,
-    isLoading: reportLoading,
-    error: reportError,
-  } = useGetCurrentMonthReport();
 
-  const currentMonth = new Date().toLocaleDateString("hr-HR", {
+  const now = new Date();
+  const currentMonthNum = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  const currentMonth = now.toLocaleDateString("hr-HR", {
     month: "long",
     year: "numeric",
   });
 
-  const cashIncome =
-    monthlyReport?.incomeByPaymentMethod.find(
-      (pm) => pm.paymentMethod === "Gotovina",
-    )?.total ?? BigInt(0);
-  const cardIncome =
-    monthlyReport?.incomeByPaymentMethod.find(
-      (pm) => pm.paymentMethod === "Kartica",
-    )?.total ?? BigInt(0);
+  // Compute monthly totals client-side from all transactions
+  const monthlyTotals = useMemo(() => {
+    if (!allTransactions) {
+      return {
+        totalIncome: BigInt(0),
+        totalExpenses: BigInt(0),
+        profit: BigInt(0),
+        cashIncome: BigInt(0),
+        cardIncome: BigInt(0),
+      };
+    }
 
-  const hasError = overviewError || transactionsError || reportError;
+    const monthStart = getMonthStartTimestamp(currentMonthNum, currentYear);
+    const monthEnd = getMonthEndTimestamp(currentMonthNum, currentYear);
+
+    const monthTxns = allTransactions.filter(
+      (t) => t.date >= monthStart && t.date <= monthEnd,
+    );
+
+    let totalIncome = BigInt(0);
+    let totalExpenses = BigInt(0);
+    let cashIncome = BigInt(0);
+    let cardIncome = BigInt(0);
+
+    for (const t of monthTxns) {
+      if (t.transactionType === TransactionType.prihod) {
+        totalIncome += t.amount;
+        if (t.paymentMethod === PaymentMethod.gotovina) {
+          cashIncome += t.amount;
+        } else if (t.paymentMethod === PaymentMethod.kartica) {
+          cardIncome += t.amount;
+        }
+      } else if (t.transactionType === TransactionType.rashod) {
+        totalExpenses += t.amount;
+      }
+    }
+
+    return {
+      totalIncome,
+      totalExpenses,
+      profit: totalIncome - totalExpenses,
+      cashIncome,
+      cardIncome,
+    };
+  }, [allTransactions, currentMonthNum, currentYear]);
+
+  const isLoading = allLoading;
+  const hasError = allError || transactionsError;
+
   if (hasError) {
     return (
       <div className="container py-4 sm:py-8 px-4">
@@ -90,11 +133,11 @@ export default function Dashboard() {
             <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            {overviewLoading ? (
+            {isLoading ? (
               <Skeleton className="h-6 sm:h-8 w-24 sm:w-32" />
             ) : (
               <div className="text-xl sm:text-2xl font-bold text-green-600">
-                {formatCurrency(centsToEur(overview?.totalIncome ?? BigInt(0)))}
+                {formatCurrency(centsToEur(monthlyTotals.totalIncome))}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">Ovaj mjesec</p>
@@ -109,13 +152,11 @@ export default function Dashboard() {
             <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            {overviewLoading ? (
+            {isLoading ? (
               <Skeleton className="h-6 sm:h-8 w-24 sm:w-32" />
             ) : (
               <div className="text-xl sm:text-2xl font-bold text-red-600">
-                {formatCurrency(
-                  centsToEur(overview?.totalExpenses ?? BigInt(0)),
-                )}
+                {formatCurrency(centsToEur(monthlyTotals.totalExpenses))}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">Ovaj mjesec</p>
@@ -130,17 +171,17 @@ export default function Dashboard() {
             <DollarSign className="h-3 w-3 sm:h-4 sm:w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            {overviewLoading ? (
+            {isLoading ? (
               <Skeleton className="h-6 sm:h-8 w-24 sm:w-32" />
             ) : (
               <div
                 className={`text-xl sm:text-2xl font-bold ${
-                  Number(overview?.profit ?? BigInt(0)) >= 0
+                  monthlyTotals.profit >= BigInt(0)
                     ? "text-green-600"
                     : "text-red-600"
                 }`}
               >
-                {formatCurrency(centsToEur(overview?.profit ?? BigInt(0)))}
+                {formatCurrency(centsToEur(monthlyTotals.profit))}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">Ovaj mjesec</p>
@@ -157,11 +198,11 @@ export default function Dashboard() {
             <Banknote className="h-3 w-3 sm:h-4 sm:w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            {reportLoading ? (
+            {isLoading ? (
               <Skeleton className="h-6 sm:h-8 w-24 sm:w-32" />
             ) : (
               <div className="text-xl sm:text-2xl font-bold text-green-600">
-                {formatCurrency(centsToEur(cashIncome))}
+                {formatCurrency(centsToEur(monthlyTotals.cashIncome))}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">Ovaj mjesec</p>
@@ -176,11 +217,11 @@ export default function Dashboard() {
             <CreditCard className="h-3 w-3 sm:h-4 sm:w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            {reportLoading ? (
+            {isLoading ? (
               <Skeleton className="h-6 sm:h-8 w-24 sm:w-32" />
             ) : (
               <div className="text-xl sm:text-2xl font-bold text-green-600">
-                {formatCurrency(centsToEur(cardIncome))}
+                {formatCurrency(centsToEur(monthlyTotals.cardIncome))}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">Ovaj mjesec</p>
@@ -200,77 +241,87 @@ export default function Dashboard() {
         <CardContent>
           {transactionsLoading ? (
             <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-14 sm:h-16 w-full" />
-              ))}
+              <Skeleton className="h-14 sm:h-16 w-full" />
+              <Skeleton className="h-14 sm:h-16 w-full" />
+              <Skeleton className="h-14 sm:h-16 w-full" />
+              <Skeleton className="h-14 sm:h-16 w-full" />
+              <Skeleton className="h-14 sm:h-16 w-full" />
             </div>
           ) : recentTransactions && recentTransactions.length > 0 ? (
             <div className="space-y-2 sm:space-y-3">
-              {recentTransactions.map((transaction: Transaction) => (
-                <div
-                  key={Number(transaction.id)}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border p-3 sm:p-4"
-                >
-                  <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
-                    <div
-                      className={`flex h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0 items-center justify-center rounded-full ${
-                        transaction.transactionType === TransactionType.prihod
-                          ? "bg-green-100"
-                          : "bg-red-100"
-                      }`}
-                    >
-                      {transaction.transactionType ===
-                      TransactionType.prihod ? (
-                        <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
-                      ) : (
-                        <TrendingDown className="h-4 w-4 sm:h-5 sm:w-5 text-red-600" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm sm:text-base truncate">
-                        {transaction.description}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
+              {recentTransactions.map(
+                (transaction: Transaction, idx: number) => (
+                  <div
+                    key={Number(transaction.id)}
+                    data-ocid={`transactions.item.${idx + 1}`}
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border p-3 sm:p-4"
+                  >
+                    <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                      <div
+                        className={`flex h-8 w-8 sm:h-10 sm:w-10 flex-shrink-0 items-center justify-center rounded-full ${
+                          transaction.transactionType === TransactionType.prihod
+                            ? "bg-green-100"
+                            : "bg-red-100"
+                        }`}
+                      >
                         {transaction.transactionType ===
-                          TransactionType.prihod &&
-                          transaction.paymentMethod && (
-                            <span className="flex items-center gap-1">
-                              {transaction.paymentMethod === "gotovina" ? (
-                                <Banknote className="h-3 w-3" />
-                              ) : (
-                                <CreditCard className="h-3 w-3" />
-                              )}
-                              {transaction.paymentMethod === "gotovina"
-                                ? "Gotovina"
-                                : "Kartica"}
-                            </span>
-                          )}
-                        <Calendar className="h-3 w-3" />
-                        <span className="whitespace-nowrap">
-                          {new Date(
-                            Number(transaction.date) / 1000000,
-                          ).toLocaleDateString("hr-HR")}
-                        </span>
+                        TransactionType.prihod ? (
+                          <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+                        ) : (
+                          <TrendingDown className="h-4 w-4 sm:h-5 sm:w-5 text-red-600" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm sm:text-base truncate">
+                          {transaction.description}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
+                          {transaction.transactionType ===
+                            TransactionType.prihod &&
+                            transaction.paymentMethod && (
+                              <span className="flex items-center gap-1">
+                                {transaction.paymentMethod ===
+                                PaymentMethod.gotovina ? (
+                                  <Banknote className="h-3 w-3" />
+                                ) : (
+                                  <CreditCard className="h-3 w-3" />
+                                )}
+                                {transaction.paymentMethod ===
+                                PaymentMethod.gotovina
+                                  ? "Gotovina"
+                                  : "Kartica"}
+                              </span>
+                            )}
+                          <Calendar className="h-3 w-3" />
+                          <span className="whitespace-nowrap">
+                            {new Date(
+                              Number(transaction.date) / 1000000,
+                            ).toLocaleDateString("hr-HR")}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                    <div
+                      className={`text-base sm:text-lg font-semibold whitespace-nowrap ${
+                        transaction.transactionType === TransactionType.prihod
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {transaction.transactionType === TransactionType.prihod
+                        ? "+"
+                        : "-"}
+                      {formatCurrency(centsToEur(transaction.amount))}
+                    </div>
                   </div>
-                  <div
-                    className={`text-base sm:text-lg font-semibold whitespace-nowrap ${
-                      transaction.transactionType === TransactionType.prihod
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {transaction.transactionType === TransactionType.prihod
-                      ? "+"
-                      : "-"}
-                    {formatCurrency(centsToEur(transaction.amount))}
-                  </div>
-                </div>
-              ))}
+                ),
+              )}
             </div>
           ) : (
-            <div className="py-8 sm:py-12 text-center text-muted-foreground">
+            <div
+              data-ocid="transactions.empty_state"
+              className="py-8 sm:py-12 text-center text-muted-foreground"
+            >
               <p className="text-sm sm:text-base">Nema transakcija za prikaz</p>
             </div>
           )}

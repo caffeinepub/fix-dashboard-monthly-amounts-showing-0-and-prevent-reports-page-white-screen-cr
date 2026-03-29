@@ -387,9 +387,9 @@ export class EditCommunicator {
     const target = e.target as HTMLElement;
 
     const allElements = document.querySelectorAll(".editor-hover");
-    allElements.forEach((element) => {
+    for (const element of allElements) {
       element.classList.remove("editor-hover");
-    });
+    }
 
     target.classList.add("editor-hover");
   }
@@ -410,14 +410,14 @@ export class EditCommunicator {
     const matched: string[] = [];
 
     const elements = document.querySelectorAll<HTMLElement>("*");
-    elements.forEach((el) => {
+    for (const el of elements) {
       const domTreeString = this.#generateDOMTreeString(el);
       const id = hashDomTreeString(domTreeString);
       if (wanted.has(id)) {
         this.#addSelection(id, el, domTreeString);
         matched.push(id);
       }
-    });
+    }
 
     const selectedElements = Array.from(this.#selectedElements.values()).map(
       ({ id, domTreeString }) => ({

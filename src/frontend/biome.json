@@ -23,23 +23,14 @@
       "recommended": true,
       "correctness": {
         "useHookAtTopLevel": "error",
-        "noUnusedVariables": "error",
-        "useExhaustiveDependencies": "warn"
+        "noUnusedVariables": "error"
       },
       "suspicious": {
-        "noExplicitAny": "off",
-        "noArrayIndexKey": "off",
-        "noCommentText": "off"
+        "noExplicitAny": "off"
       },
       "style": {
         "useConst": "off",
         "noNonNullAssertion": "off"
-      },
-      "complexity": {
-        "noForEach": "off"
-      },
-      "a11y": {
-        "noLabelWithoutControl": "off"
       }
     }
   },
