@@ -465,6 +465,8 @@ export function useGetDfinityVoiceCommandIssueReport() {
 function invalidateFinancialQueries(queryClient: any) {
   queryClient.invalidateQueries({ queryKey: ["overview"] });
   queryClient.invalidateQueries({ queryKey: ["report"] });
+  queryClient.invalidateQueries({ queryKey: ["report", "yearly"] });
+  queryClient.invalidateQueries({ queryKey: ["report", "monthly"] });
   queryClient.invalidateQueries({ queryKey: ["transactions"] });
   queryClient.invalidateQueries({ queryKey: ["expense-share"] });
   queryClient.invalidateQueries({ queryKey: ["monthly-incomes"] });

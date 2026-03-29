@@ -1,4 +1,9 @@
-import { PaymentMethod, type Transaction, TransactionType } from "@/backend";
+import {
+  type MonthlyIncomeInput,
+  PaymentMethod,
+  type Transaction,
+  TransactionType,
+} from "@/backend";
 import { ReadOnlyBanner } from "@/components/ReadOnlyBanner";
 import {
   Card,
@@ -9,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  useGetAllMonthlyIncomes,
   useGetAllTransactions,
   useGetRecentTransactions,
 } from "@/hooks/useQueries";
@@ -39,6 +45,7 @@ export default function Dashboard() {
     isLoading: transactionsLoading,
     error: transactionsError,
   } = useGetRecentTransactions();
+  const { data: allMonthlyIncomes } = useGetAllMonthlyIncomes();
 
   const now = new Date();
   const currentMonthNum = now.getMonth() + 1;
@@ -49,40 +56,45 @@ export default function Dashboard() {
     year: "numeric",
   });
 
-  // Compute monthly totals client-side from all transactions
+  // Compute monthly totals client-side from all transactions + monthly incomes
   const monthlyTotals = useMemo(() => {
-    if (!allTransactions) {
-      return {
-        totalIncome: BigInt(0),
-        totalExpenses: BigInt(0),
-        profit: BigInt(0),
-        cashIncome: BigInt(0),
-        cardIncome: BigInt(0),
-      };
-    }
-
     const monthStart = getMonthStartTimestamp(currentMonthNum, currentYear);
     const monthEnd = getMonthEndTimestamp(currentMonthNum, currentYear);
-
-    const monthTxns = allTransactions.filter(
-      (t) => t.date >= monthStart && t.date <= monthEnd,
-    );
 
     let totalIncome = BigInt(0);
     let totalExpenses = BigInt(0);
     let cashIncome = BigInt(0);
     let cardIncome = BigInt(0);
 
-    for (const t of monthTxns) {
-      if (t.transactionType === TransactionType.prihod) {
-        totalIncome += t.amount;
-        if (t.paymentMethod === PaymentMethod.gotovina) {
-          cashIncome += t.amount;
-        } else if (t.paymentMethod === PaymentMethod.kartica) {
-          cardIncome += t.amount;
+    // Sum from regular transactions
+    if (allTransactions) {
+      const monthTxns = allTransactions.filter(
+        (t) => t.date >= monthStart && t.date <= monthEnd,
+      );
+
+      for (const t of monthTxns) {
+        if (t.transactionType === TransactionType.prihod) {
+          totalIncome += t.amount;
+          if (t.paymentMethod === PaymentMethod.gotovina) {
+            cashIncome += t.amount;
+          } else if (t.paymentMethod === PaymentMethod.kartica) {
+            cardIncome += t.amount;
+          }
+        } else if (t.transactionType === TransactionType.rashod) {
+          totalExpenses += t.amount;
         }
-      } else if (t.transactionType === TransactionType.rashod) {
-        totalExpenses += t.amount;
+      }
+    }
+
+    // Add monthly incomes entered via "Brzi unos prihoda"
+    if (allMonthlyIncomes) {
+      for (const income of allMonthlyIncomes) {
+        if (
+          Number(income.year) === currentYear &&
+          Number(income.month) === currentMonthNum
+        ) {
+          totalIncome += income.amount;
+        }
       }
     }
 
@@ -93,7 +105,7 @@ export default function Dashboard() {
       cashIncome,
       cardIncome,
     };
-  }, [allTransactions, currentMonthNum, currentYear]);
+  }, [allTransactions, allMonthlyIncomes, currentMonthNum, currentYear]);
 
   const isLoading = allLoading;
   const hasError = allError || transactionsError;

@@ -6,14 +6,12 @@ export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-// Currency utilities
-export function eurToCents(eur: number): bigint {
-  return BigInt(Math.round(eur * 100));
+export function centsToEur(cents: bigint): number {
+  return Number(cents) / 100;
 }
 
-export function centsToEur(cents: bigint | number): number {
-  const c = typeof cents === "bigint" ? Number(cents) : cents;
-  return c / 100;
+export function eurToCents(eur: number): bigint {
+  return BigInt(Math.round(eur * 100));
 }
 
 export function formatCurrency(amount: number): string {
@@ -25,7 +23,6 @@ export function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-// Month utilities
 export const MONTH_NAMES = [
   "Siječanj",
   "Veljača",
@@ -42,10 +39,9 @@ export const MONTH_NAMES = [
 ];
 
 export function getMonthName(month: number): string {
-  return MONTH_NAMES[month - 1] ?? "";
+  return MONTH_NAMES[month - 1] || "";
 }
 
-// Timestamp utilities (nanoseconds for ICP)
 export function getMonthStartTimestamp(month: number, year: number): bigint {
   const date = new Date(year, month - 1, 1, 0, 0, 0, 0);
   return BigInt(date.getTime()) * BigInt(1_000_000);
