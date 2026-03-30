@@ -2138,13 +2138,30 @@ actor RestaurantFinance {
                 // Create a date for the 1st of the month
                 let id = nextId;
                 nextId += 1;
+                // Calculate timestamp (nanoseconds) for 1st of month/year
+                let daysInMonths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                let isLeap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0);
+                var totalDays : Int = 0;
+                var y : Nat = 1970;
+                while (y < year) {
+                  let ly = (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0);
+                  totalDays += if (ly) 366 else 365;
+                  y += 1;
+                };
+                var m : Nat = 1;
+                while (m < month) {
+                  let dim = if (m == 2 and isLeap) 29 else daysInMonths[m - 1];
+                  totalDays += dim;
+                  m += 1;
+                };
+                let monthTimestamp : Int = totalDays * 24 * 60 * 60 * 1_000_000_000;
                 let transaction : Transaction = {
                   id;
                   amount;
                   transactionType = #prihod;
                   expenseCategory = null;
                   paymentMethod = null;
-                  date = 0; // Will be set to epoch; frontend will display by month/year
+                  date = monthTimestamp;
                   description = desc;
                 };
                 transactions.add(id, transaction);
