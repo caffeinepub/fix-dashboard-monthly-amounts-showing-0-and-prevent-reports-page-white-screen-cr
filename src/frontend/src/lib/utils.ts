@@ -7,8 +7,6 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 // Financial utility functions
-// NOTE: amounts are stored as raw integer EUR values (not cents)
-// centsToEur and eurToCents are kept for API compatibility but do NOT apply /100 or *100
 export const MONTH_NAMES = [
   "Siječanj",
   "Veljača",
@@ -26,53 +24,47 @@ export const MONTH_NAMES = [
 
 export const CROATIAN_MONTHS = MONTH_NAMES;
 
+export function getMonthName(month: number): string {
+  return MONTH_NAMES[month] ?? "";
+}
+
+/** Convert cents (bigint or number) to EUR as a float */
 export function centsToEur(cents: bigint | number): number {
-  // Stored values are raw EUR integers, no division needed
-  return typeof cents === "bigint" ? Number(cents) : cents;
+  return Number(cents) / 100;
 }
 
+/** Convert EUR float to cents as bigint */
 export function eurToCents(eur: number): bigint {
-  // Store as raw EUR integer, no multiplication needed
-  return BigInt(Math.round(eur));
+  return BigInt(Math.round(eur * 100));
 }
 
-export function formatCurrency(amount: bigint | number): string {
-  const value = typeof amount === "bigint" ? Number(amount) : amount;
+/** Format a number as Croatian currency string */
+export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("hr-HR", {
     style: "currency",
     currency: "EUR",
-  }).format(value);
+    minimumFractionDigits: 2,
+  }).format(amount);
 }
 
-export function getMonthName(month: number): string {
-  return MONTH_NAMES[month - 1] ?? "";
+/** Get timestamp (nanoseconds) for start of month */
+export function getMonthStartTimestamp(year: number, month: number): bigint {
+  const date = new Date(year, month, 1, 0, 0, 0, 0);
+  return BigInt(date.getTime()) * BigInt(1_000_000);
 }
 
-// Note: getMonthStartTimestamp(month, year) - month first, year second
-export function getMonthStartTimestamp(month: number, year: number): bigint {
-  return BigInt(new Date(year, month - 1, 1).getTime()) * 1_000_000n;
+/** Get timestamp (nanoseconds) for end of month */
+export function getMonthEndTimestamp(year: number, month: number): bigint {
+  const date = new Date(year, month + 1, 0, 23, 59, 59, 999);
+  return BigInt(date.getTime()) * BigInt(1_000_000);
 }
 
-export function getMonthEndTimestamp(month: number, year: number): bigint {
-  return (
-    BigInt(new Date(year, month, 0, 23, 59, 59, 999).getTime()) * 1_000_000n
-  );
-}
-
+/** Get timestamp (nanoseconds) for start of year */
 export function getYearStartTimestamp(year: number): bigint {
-  return BigInt(new Date(year, 0, 1).getTime()) * 1_000_000n;
+  return getMonthStartTimestamp(year, 0);
 }
 
+/** Get timestamp (nanoseconds) for end of year */
 export function getYearEndTimestamp(year: number): bigint {
-  return BigInt(new Date(year, 11, 31, 23, 59, 59, 999).getTime()) * 1_000_000n;
-}
-
-export function timestampToDate(nanos: bigint | number): Date {
-  const ms =
-    typeof nanos === "bigint" ? Number(nanos) / 1_000_000 : nanos / 1_000_000;
-  return new Date(ms);
-}
-
-export function dateToTimestamp(date: Date): bigint {
-  return BigInt(date.getTime()) * 1_000_000n;
+  return getMonthEndTimestamp(year, 11);
 }

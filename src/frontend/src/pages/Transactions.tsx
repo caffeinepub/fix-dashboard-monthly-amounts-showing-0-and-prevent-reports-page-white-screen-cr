@@ -420,7 +420,7 @@ export default function Transactions() {
                       {transaction.transactionType === TransactionType.prihod
                         ? "+"
                         : "-"}
-                      {formatCurrency(Number(transaction.amount) / 100)}
+                      {formatCurrency(centsToEur(transaction.amount))}
                     </div>
                     <div className="flex gap-2">
                       <Button
