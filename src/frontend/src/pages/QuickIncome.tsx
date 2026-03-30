@@ -29,13 +29,12 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  useAddMonthlyIncome,
   useAddTransaction,
-  useDeleteMonthlyIncome,
+  useClearMigratedMonthlyIncomes,
   useDeleteTransaction,
   useGetAllMonthlyIncomes,
   useGetAllTransactions,
-  useUpdateMonthlyIncome,
+  useMigrateMonthlyIncomes,
 } from "@/hooks/useQueries";
 import { useReadOnlyMode } from "@/hooks/useReadOnlyMode";
 import {
@@ -47,6 +46,7 @@ import {
   getMonthStartTimestamp,
 } from "@/lib/utils";
 import {
+  AlertCircle,
   Calendar,
   ChevronDown,
   ChevronUp,
@@ -106,26 +106,31 @@ export default function QuickIncome() {
   const [monthToDeleteExpenses, setMonthToDeleteExpenses] = useState<
     number | null
   >(null);
+  const [isMigrating, setIsMigrating] = useState(false);
 
   const { data: allMonthlyIncomes, isLoading } = useGetAllMonthlyIncomes();
   const { data: allTransactions } = useGetAllTransactions();
-  const addMonthlyIncome = useAddMonthlyIncome();
-  const updateMonthlyIncome = useUpdateMonthlyIncome();
-  const deleteMonthlyIncome = useDeleteMonthlyIncome();
+  const migrateMonthlyIncomes = useMigrateMonthlyIncomes();
+  const clearMigratedMonthlyIncomes = useClearMigratedMonthlyIncomes();
   const addTransaction = useAddTransaction();
   const deleteTransaction = useDeleteTransaction();
 
-  const existingIncomes =
-    allMonthlyIncomes?.filter(
-      (income) => Number(income.year) === selectedYear,
-    ) || [];
-  const existingIncomesMap = existingIncomes.reduce(
-    (acc, income) => {
-      acc[Number(income.month)] = centsToEur(income.amount);
-      return acc;
-    },
-    {} as Record<number, number>,
-  );
+  // Compute existing incomes from standard transactions (by description pattern)
+  const existingIncomesMap = useMemo(() => {
+    if (!allTransactions)
+      return {} as Record<number, { amount: number; id: bigint }>;
+    const result: Record<number, { amount: number; id: bigint }> = {};
+    for (let m = 1; m <= 12; m++) {
+      const desc = `Brzi unos - ${m}/${selectedYear}`;
+      const t = allTransactions.find(
+        (tx) =>
+          tx.transactionType === TransactionType.prihod &&
+          tx.description === desc,
+      );
+      if (t) result[m] = { amount: centsToEur(t.amount), id: t.id };
+    }
+    return result;
+  }, [allTransactions, selectedYear]);
 
   // Compute existing expenses per month from transactions
   const existingExpensesMap = useMemo(() => {
@@ -204,6 +209,28 @@ export default function QuickIncome() {
 
   const yearOptions = Array.from({ length: 11 }, (_, i) => currentYear - i);
 
+  // ---- Migration handler ----
+  const handleMigration = async () => {
+    if (isReadOnly) {
+      toast.error("Operacija nije dostupna u načinu samo za čitanje");
+      return;
+    }
+    setIsMigrating(true);
+    try {
+      const count = await migrateMonthlyIncomes.mutateAsync();
+      await clearMigratedMonthlyIncomes.mutateAsync();
+      toast.success(
+        `Migracija završena! Prebačeno ${count} prihoda u standardne transakcije.`,
+      );
+    } catch (error: any) {
+      toast.error(
+        `Greška pri migraciji: ${error.message || "Nepoznata greška"}`,
+      );
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   // ---- Income handlers ----
   const handleAmountChange = (month: number, value: string) => {
     if (isReadOnly) return;
@@ -213,11 +240,11 @@ export default function QuickIncome() {
 
   const handleEditMonth = (month: number) => {
     if (isReadOnly) return;
-    const existingAmount = existingIncomesMap[month];
-    if (existingAmount !== undefined) {
+    const existing = existingIncomesMap[month];
+    if (existing !== undefined) {
       setMonthlyAmounts((prev) => ({
         ...prev,
-        [month]: existingAmount.toFixed(2),
+        [month]: existing.amount.toFixed(2),
       }));
       setEditingMonths((prev) => new Set(prev).add(month));
     }
@@ -252,22 +279,28 @@ export default function QuickIncome() {
       return;
     }
 
-    const input = {
-      year: BigInt(selectedYear),
-      month: BigInt(month),
-      amount: eurToCents(amount),
-    };
     const isEditing = editingMonths.has(month);
-    const existingAmount = existingIncomesMap[month];
+    const existing = existingIncomesMap[month];
 
     try {
-      if (isEditing || existingAmount !== undefined) {
-        await updateMonthlyIncome.mutateAsync(input);
+      // If editing, delete old transaction first
+      if (isEditing && existing !== undefined) {
+        await deleteTransaction.mutateAsync(existing.id);
+      }
+
+      await addTransaction.mutateAsync({
+        transactionType: TransactionType.prihod,
+        amount: eurToCents(amount),
+        date: getMonthStartTimestamp(month, selectedYear),
+        description: `Brzi unos - ${month}/${selectedYear}`,
+      });
+
+      if (isEditing || existing !== undefined) {
         toast.success(`Prihod za ${MONTH_NAMES[month - 1]} ažuriran`);
       } else {
-        await addMonthlyIncome.mutateAsync(input);
         toast.success(`Prihod za ${MONTH_NAMES[month - 1]} spremljen`);
       }
+
       setMonthlyAmounts((prev) => {
         const n = { ...prev };
         delete n[month];
@@ -296,11 +329,14 @@ export default function QuickIncome() {
 
   const handleDeleteConfirm = async () => {
     if (monthToDelete === null || isReadOnly) return;
+    const existing = existingIncomesMap[monthToDelete];
+    if (!existing) {
+      setDeleteDialogOpen(false);
+      setMonthToDelete(null);
+      return;
+    }
     try {
-      await deleteMonthlyIncome.mutateAsync({
-        year: BigInt(selectedYear),
-        month: BigInt(monthToDelete),
-      });
+      await deleteTransaction.mutateAsync(existing.id);
       toast.success(`Prihod za ${MONTH_NAMES[monthToDelete - 1]} obrisan`);
       setMonthlyAmounts((prev) => {
         const n = { ...prev };
@@ -344,19 +380,18 @@ export default function QuickIncome() {
         errorCount++;
         continue;
       }
-      const input = {
-        year: BigInt(selectedYear),
-        month: BigInt(month),
-        amount: eurToCents(amount),
-      };
       const isEditing = editingMonths.has(month);
-      const existingAmount = existingIncomesMap[month];
+      const existing = existingIncomesMap[month];
       try {
-        if (isEditing || existingAmount !== undefined) {
-          await updateMonthlyIncome.mutateAsync(input);
-        } else {
-          await addMonthlyIncome.mutateAsync(input);
+        if (isEditing && existing !== undefined) {
+          await deleteTransaction.mutateAsync(existing.id);
         }
+        await addTransaction.mutateAsync({
+          transactionType: TransactionType.prihod,
+          amount: eurToCents(amount),
+          date: getMonthStartTimestamp(month, selectedYear),
+          description: `Brzi unos - ${month}/${selectedYear}`,
+        });
         successCount++;
       } catch {
         errorCount++;
@@ -375,20 +410,21 @@ export default function QuickIncome() {
   const getDisplayAmount = (month: number): string => {
     if (monthlyAmounts[month] !== undefined) return monthlyAmounts[month];
     const existing = existingIncomesMap[month];
-    if (existing !== undefined) return existing.toFixed(2);
+    if (existing !== undefined) return existing.amount.toFixed(2);
     return "";
   };
 
   const hasChanges = Object.keys(monthlyAmounts).length > 0;
-  const isSaving =
-    addMonthlyIncome.isPending ||
-    updateMonthlyIncome.isPending ||
-    deleteMonthlyIncome.isPending;
+  const isSaving = addTransaction.isPending || deleteTransaction.isPending;
   const totalIncome = Object.values(existingIncomesMap).reduce(
-    (sum, a) => sum + a,
+    (sum, e) => sum + e.amount,
     0,
   );
   const enteredMonthsCount = Object.keys(existingIncomesMap).length;
+
+  // Check if old monthly incomes exist (migration banner)
+  const hasOldMonthlyIncomes =
+    allMonthlyIncomes !== undefined && allMonthlyIncomes.length > 0;
 
   // ---- Expense handlers ----
   const toggleExpenseMonth = (month: number) => {
@@ -396,7 +432,6 @@ export default function QuickIncome() {
       const s = new Set(prev);
       if (s.has(month)) {
         s.delete(month);
-        // Also remove from editing if closing
         setEditingExpenseMonths((ep) => {
           const es = new Set(ep);
           es.delete(month);
@@ -407,7 +442,6 @@ export default function QuickIncome() {
       }
       return s;
     });
-    // Init category amounts if not set
     if (!expenseCategoryAmounts[month]) {
       setExpenseCategoryAmounts((prev) => ({
         ...prev,
@@ -423,7 +457,6 @@ export default function QuickIncome() {
     const byCategory = existingExpensesByCategoryMap[month];
     if (!byCategory) return;
 
-    // Load existing category amounts into state
     const newCategoryAmounts: CategoryAmounts = Object.fromEntries(
       EXPENSE_CATEGORIES.map((c) => [c.key, ""]),
     );
@@ -487,7 +520,6 @@ export default function QuickIncome() {
       return;
     }
 
-    // Collect all transaction IDs for this month
     const allIds: bigint[] = Object.values(byCategory).flatMap(
       (c) => c.transactionIds,
     );
@@ -497,7 +529,6 @@ export default function QuickIncome() {
       toast.success(
         `Rashodi za ${MONTH_NAMES[month - 1]} ${selectedYear} obrisani`,
       );
-      // Clean up local state
       setExpenseTotals((prev) => {
         const n = { ...prev };
         delete n[month];
@@ -520,18 +551,12 @@ export default function QuickIncome() {
       });
     } catch (error: any) {
       toast.error(
-        `Greška pri brisanju: ${error.message || "Nepoznata greška"}`,
+        `Greška pri brisanju rashoda: ${error.message || "Nepoznata greška"}`,
       );
     } finally {
       setDeleteExpenseDialogOpen(false);
       setMonthToDeleteExpenses(null);
     }
-  };
-
-  const handleExpenseTotalChange = (month: number, value: string) => {
-    if (isReadOnly) return;
-    const sanitized = value.replace(/[^\d.]/g, "");
-    setExpenseTotals((prev) => ({ ...prev, [month]: sanitized }));
   };
 
   const handleCategoryAmountChange = (
@@ -585,7 +610,6 @@ export default function QuickIncome() {
 
     setSavingExpenseMonth(month);
     try {
-      // If editing, first delete all existing transactions for this month
       if (isEditing) {
         const byCategory = existingExpensesByCategoryMap[month];
         if (byCategory) {
@@ -598,7 +622,6 @@ export default function QuickIncome() {
         }
       }
 
-      // Then create new transactions for non-zero categories
       const saves = EXPENSE_CATEGORIES.filter((c) => {
         const val = Number.parseFloat(cats[c.key] || "0");
         return val > 0;
@@ -619,7 +642,6 @@ export default function QuickIncome() {
           : `Rashodi za ${monthName} ${selectedYear} spremljeni`,
       );
 
-      // Reset this month
       setExpenseTotals((prev) => {
         const n = { ...prev };
         delete n[month];
@@ -707,6 +729,47 @@ export default function QuickIncome() {
         </p>
       </div>
 
+      {/* Migration banner */}
+      {hasOldMonthlyIncomes && (
+        <Card
+          className="mb-6 border-amber-300 bg-amber-50 dark:bg-amber-950/20"
+          data-ocid="quickincome.migration.panel"
+        >
+          <CardContent className="pt-4">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-start gap-2 flex-1">
+                <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                    Pronađeni su stari prihodi iz brzih unosa
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+                    Pronađeni su stari prihodi iz brzih unosa koji nisu vidljivi
+                    u svim modulima. Kliknite &ldquo;Pokreni migraciju&rdquo; da
+                    ih prebacite u standardne transakcije.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={handleMigration}
+                disabled={isMigrating || isReadOnly}
+                className="flex-shrink-0 gap-2"
+                data-ocid="quickincome.migration.button"
+              >
+                {isMigrating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Migracija u tijeku...
+                  </>
+                ) : (
+                  "Pokreni migraciju"
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="prihodi" data-ocid="quickincome.tab">
         <TabsList className="mb-6 w-full sm:w-auto">
           <TabsTrigger
@@ -738,8 +801,8 @@ export default function QuickIncome() {
             <>
               <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {MONTHS.map((month) => {
-                  const existingAmount = existingIncomesMap[month.value];
-                  const hasExisting = existingAmount !== undefined;
+                  const existing = existingIncomesMap[month.value];
+                  const hasExisting = existing !== undefined;
                   const displayAmount = getDisplayAmount(month.value);
                   const hasUnsavedChanges =
                     monthlyAmounts[month.value] !== undefined;
@@ -756,7 +819,7 @@ export default function QuickIncome() {
                         </CardTitle>
                         {hasExisting && !hasUnsavedChanges && (
                           <CardDescription className="text-xs sm:text-sm">
-                            Trenutni prihod: {formatCurrency(existingAmount)}
+                            Trenutni prihod: {formatCurrency(existing.amount)}
                           </CardDescription>
                         )}
                       </CardHeader>
@@ -829,7 +892,7 @@ export default function QuickIncome() {
                                 </Button>
                                 <Button
                                   size="icon"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDeleteClick(month.value)}
                                   disabled={isSaving || isReadOnly}
                                   className="h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0"
@@ -865,30 +928,31 @@ export default function QuickIncome() {
                 })}
               </div>
 
-              {hasChanges && !isReadOnly && (
+              {/* Save All button */}
+              {hasChanges && (
                 <div className="mt-4 sm:mt-6 flex justify-end">
                   <Button
-                    size="lg"
                     onClick={handleSaveAll}
-                    disabled={isSaving}
-                    className="w-full sm:w-auto"
+                    disabled={isSaving || isReadOnly}
+                    className="gap-2"
                     data-ocid="quickincome.prihodi.primary_button"
                   >
                     {isSaving ? (
                       <>
-                        <Loader2 className="mr-2 h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                         Spremanje...
                       </>
                     ) : (
                       <>
-                        <Save className="mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                        Spremi sve promjene
+                        <Save className="h-4 w-4" />
+                        Spremi sve izmjene
                       </>
                     )}
                   </Button>
                 </div>
               )}
 
+              {/* Summary */}
               <Card className="mt-6 sm:mt-8">
                 <CardHeader>
                   <CardTitle className="text-base sm:text-lg">
@@ -912,140 +976,103 @@ export default function QuickIncome() {
         <TabsContent value="rashodi">
           {YearSelector}
 
-          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:gap-4">
             {MONTHS.map((month) => {
-              const existingTotal = existingExpensesMap[month.value];
-              const hasExisting = existingTotal !== undefined;
+              const existingExpenseAmount = existingExpensesMap[month.value];
+              const hasExistingExpenses = existingExpenseAmount !== undefined;
               const isExpanded = expandedExpenseMonths.has(month.value);
               const isEditingExpense = editingExpenseMonths.has(month.value);
+              const isSavingThis = savingExpenseMonth === month.value;
               const enteredTotal = getEnteredTotal(month.value);
               const distributedTotal = getDistributedTotal(month.value);
               const valid = isDistributionValid(month.value);
-              const isSavingThis = savingExpenseMonth === month.value;
-              const cats = expenseCategoryAmounts[month.value] || {};
               const diff = enteredTotal - distributedTotal;
+              const cats = expenseCategoryAmounts[month.value] || {};
 
               return (
-                <Card
-                  key={month.value}
-                  className={
-                    isExpanded
-                      ? "border-primary sm:col-span-2 lg:col-span-3"
-                      : ""
-                  }
-                  data-ocid={`quickincome.rashodi.item.${month.value}`}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <CardTitle className="text-base sm:text-lg">
-                          {month.label}
-                        </CardTitle>
-                        {hasExisting && (
-                          <CardDescription className="text-xs sm:text-sm mt-1">
-                            Evidentirani rashodi:{" "}
-                            {formatCurrency(existingTotal)}
-                          </CardDescription>
+                <Card key={month.value}>
+                  <CardHeader
+                    className="pb-3 cursor-pointer select-none"
+                    onClick={() => {
+                      if (!hasExistingExpenses || isEditingExpense) {
+                        toggleExpenseMonth(month.value);
+                      }
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base sm:text-lg">
+                        {month.label}
+                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        {hasExistingExpenses && (
+                          <span className="text-sm font-medium text-red-600">
+                            {formatCurrency(existingExpenseAmount)}
+                          </span>
                         )}
-                        {!hasExisting && (
-                          <CardDescription className="text-xs sm:text-sm mt-1">
-                            Nema evidentiranih rashoda
-                          </CardDescription>
-                        )}
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="flex gap-1 flex-shrink-0">
-                        {hasExisting && !isExpanded ? (
-                          // Existing data, not expanded: show Edit + Delete
+                        {hasExistingExpenses && !isEditingExpense && (
                           <>
                             <Button
                               size="icon"
                               variant="outline"
-                              onClick={() =>
-                                handleEditExpenseMonth(month.value)
-                              }
-                              disabled={isReadOnly || isSavingThis}
-                              className="h-9 w-9"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditExpenseMonth(month.value);
+                              }}
+                              disabled={isSavingThis || isReadOnly}
+                              className="h-8 w-8"
                               data-ocid={`quickincome.rashodi.edit_button.${month.value}`}
                             >
                               <Edit2 className="h-4 w-4" />
                             </Button>
                             <Button
                               size="icon"
-                              variant="destructive"
-                              onClick={() =>
-                                handleDeleteExpenseClick(month.value)
-                              }
-                              disabled={isReadOnly || isSavingThis}
-                              className="h-9 w-9"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteExpenseClick(month.value);
+                              }}
+                              disabled={isSavingThis || isReadOnly}
+                              className="h-8 w-8"
                               data-ocid={`quickincome.rashodi.delete_button.${month.value}`}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </>
-                        ) : isExpanded ? (
-                          // Expanded (new or edit): show close/cancel
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              if (isEditingExpense) {
-                                handleCancelEditExpense(month.value);
-                              } else {
-                                toggleExpenseMonth(month.value);
-                              }
-                            }}
-                            disabled={isReadOnly || isSavingThis}
-                            className="flex-shrink-0 gap-1"
-                            data-ocid={`quickincome.rashodi.cancel_button.${month.value}`}
-                          >
-                            <ChevronUp className="h-4 w-4" />
-                            {isEditingExpense ? "Odustani" : "Zatvori"}
-                          </Button>
-                        ) : (
-                          // No existing data, not expanded: show entry button
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => toggleExpenseMonth(month.value)}
-                            disabled={isReadOnly}
-                            className="flex-shrink-0 gap-1"
-                            data-ocid={`quickincome.rashodi.open_modal_button.${month.value}`}
-                          >
-                            <ChevronDown className="h-4 w-4" />
-                            Unesi rashode
-                          </Button>
                         )}
+                        {!hasExistingExpenses || isEditingExpense ? (
+                          isExpanded ? (
+                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          )
+                        ) : null}
                       </div>
                     </div>
                   </CardHeader>
 
-                  {isExpanded && (
-                    <CardContent className="border-t pt-4">
-                      {isEditingExpense && (
-                        <div className="mb-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
-                          Uređivanje rashoda — prethodni podaci bit će
-                          zamijenjeni novim unosom.
-                        </div>
-                      )}
-
-                      {/* Total field */}
+                  {(isExpanded || isEditingExpense) && (
+                    <CardContent>
+                      {/* Total amount input */}
                       <div className="mb-4">
-                        <Label className="text-sm font-semibold mb-1 block">
-                          Ukupni rashodi (EUR)
+                        <Label className="text-sm mb-1 block">
+                          Ukupni rashod za {month.label} (EUR)
                         </Label>
                         <Input
                           type="text"
                           placeholder="0.00"
                           value={expenseTotals[month.value] || ""}
-                          onChange={(e) =>
-                            handleExpenseTotalChange(
-                              month.value,
-                              e.target.value,
-                            )
-                          }
-                          className="text-right h-10 sm:h-11 text-base max-w-[200px]"
+                          onChange={(e) => {
+                            if (isReadOnly) return;
+                            const sanitized = e.target.value.replace(
+                              /[^\d.]/g,
+                              "",
+                            );
+                            setExpenseTotals((prev) => ({
+                              ...prev,
+                              [month.value]: sanitized,
+                            }));
+                          }}
+                          className="text-right h-10 text-base"
                           disabled={isReadOnly || isSavingThis}
                           data-ocid={`quickincome.rashodi.input.${month.value}`}
                         />

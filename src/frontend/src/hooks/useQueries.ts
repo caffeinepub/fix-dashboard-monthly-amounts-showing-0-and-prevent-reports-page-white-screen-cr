@@ -84,7 +84,9 @@ export function useSaveCallerUserProfile() {
   return useMutation({
     mutationFn: async (profile: UserProfile) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.saveCallerUserProfile(profile);
@@ -118,7 +120,9 @@ export function useSaveBusinessProfile() {
   return useMutation({
     mutationFn: async (profile: BusinessProfile) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.saveBusinessProfile(profile);
@@ -317,7 +321,9 @@ export function useRunSimulation() {
       expenseGrowthPercentage: number;
     }) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.runSimulation(
@@ -483,7 +489,9 @@ export function useAddTransaction() {
   return useMutation({
     mutationFn: async (input: TransactionInput) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.addTransaction(input);
@@ -511,7 +519,9 @@ export function useUpdateTransaction() {
       input,
     }: { id: bigint; input: TransactionInput }) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.updateTransaction(id, input);
@@ -536,7 +546,9 @@ export function useDeleteTransaction() {
   return useMutation({
     mutationFn: async (id: bigint) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       return actor.deleteTransaction(id);
@@ -562,7 +574,9 @@ export function useAddMonthlyIncome() {
   return useMutation({
     mutationFn: async (input: MonthlyIncomeInput) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       await actor.addMonthlyIncome(input);
@@ -587,7 +601,9 @@ export function useUpdateMonthlyIncome() {
   return useMutation({
     mutationFn: async (input: MonthlyIncomeInput) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       await actor.updateMonthlyIncome(input);
@@ -612,7 +628,9 @@ export function useDeleteMonthlyIncome() {
   return useMutation({
     mutationFn: async ({ year, month }: { year: bigint; month: bigint }) => {
       if (isReadOnly) {
-        throw new Error("Operacija nije dostupna u načinu samo za čitanje");
+        throw new Error(
+          "Operacija nije dostupna u na\u010dinu samo za \u010ditanje",
+        );
       }
       if (!actor) throw new Error("Actor not initialized");
       await actor.deleteMonthlyIncome(year, month);
@@ -624,6 +642,48 @@ export function useDeleteMonthlyIncome() {
     onError: (error: any) => {
       toast.error("Error deleting monthly income", {
         description: error?.message || "Please try again",
+      });
+    },
+  });
+}
+
+export function useMigrateMonthlyIncomes() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (): Promise<bigint> => {
+      if (!actor) throw new Error("Actor not initialized");
+      // Cast to any because backend.d.ts may not yet include migration functions
+      return await (actor as any).migrateMonthlyIncomesToTransactions();
+    },
+    onSuccess: () => {
+      invalidateFinancialQueries(queryClient);
+    },
+    onError: (error: any) => {
+      toast.error("Gre\u0161ka pri migraciji", {
+        description: error?.message || "Poku\u0161ajte ponovo",
+      });
+    },
+  });
+}
+
+export function useClearMigratedMonthlyIncomes() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("Actor not initialized");
+      // Cast to any because backend.d.ts may not yet include migration functions
+      await (actor as any).clearMigratedMonthlyIncomes();
+    },
+    onSuccess: () => {
+      invalidateFinancialQueries(queryClient);
+    },
+    onError: (error: any) => {
+      toast.error("Gre\u0161ka pri \u010di\u0161\u0107enju starih podataka", {
+        description: error?.message || "Poku\u0161ajte ponovo",
       });
     },
   });

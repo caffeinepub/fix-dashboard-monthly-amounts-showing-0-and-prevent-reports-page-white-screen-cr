@@ -1,3 +1,4 @@
+import { TransactionType } from "@/backend";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useGetMonthlyReport, useGetYearlyReport } from "@/hooks/useQueries";
-import { centsToEur, formatCurrency } from "@/lib/utils";
+import {
+  useGetAllMonthlyIncomes,
+  useGetAllTransactions,
+} from "@/hooks/useQueries";
+import {
+  CROATIAN_MONTHS,
+  centsToEur,
+  formatCurrency,
+  getMonthEndTimestamp,
+  getMonthStartTimestamp,
+} from "@/lib/utils";
 import {
   AlertCircle,
   CheckCircle2,
@@ -28,7 +38,7 @@ import {
   TrendingUp,
   Upload,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 interface FinancialData {
   month: string;
@@ -47,6 +57,14 @@ interface ComparisonResult {
   status: "match" | "minor" | "major";
 }
 
+interface MonthlyOverview {
+  monthIndex: number;
+  monthName: string;
+  totalIncome: number;
+  totalExpenses: number;
+  profit: number;
+}
+
 export default function DataAnalysis() {
   const [pdfData, _setPdfData] = useState<FinancialData[]>([]);
   const [selectedYear, _setSelectedYear] = useState(new Date().getFullYear());
@@ -56,26 +74,85 @@ export default function DataAnalysis() {
   >([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const { data: yearlyReport, isLoading: yearlyLoading } =
-    useGetYearlyReport(selectedYear);
+  const { data: allTransactions, isLoading: txLoading } =
+    useGetAllTransactions();
+  const { data: allMonthlyIncomes } = useGetAllMonthlyIncomes();
+
+  // Compute yearly totals and monthly breakdown directly from transactions
+  const yearlyData = useMemo(() => {
+    let totalIncome = 0;
+    let totalExpenses = 0;
+
+    const monthlyMap: Record<number, { income: number; expenses: number }> = {};
+    for (let m = 1; m <= 12; m++) {
+      monthlyMap[m] = { income: 0, expenses: 0 };
+    }
+
+    // Regular transactions
+    if (allTransactions) {
+      for (const t of allTransactions) {
+        const date = new Date(Number(t.date) / 1_000_000);
+        const tYear = date.getFullYear();
+        const tMonth = date.getMonth() + 1;
+        if (tYear !== selectedYear) continue;
+
+        const amountEur = centsToEur(t.amount);
+        if (t.transactionType === TransactionType.prihod) {
+          totalIncome += amountEur;
+          monthlyMap[tMonth].income += amountEur;
+        } else if (t.transactionType === TransactionType.rashod) {
+          totalExpenses += amountEur;
+          monthlyMap[tMonth].expenses += amountEur;
+        }
+      }
+    }
+
+    // Monthly incomes from "Brzi unos prihoda"
+    if (allMonthlyIncomes) {
+      for (const inc of allMonthlyIncomes) {
+        if (Number(inc.year) !== selectedYear) continue;
+        const m = Number(inc.month);
+        const amountEur = centsToEur(inc.amount);
+        totalIncome += amountEur;
+        if (monthlyMap[m]) monthlyMap[m].income += amountEur;
+      }
+    }
+
+    const monthlyOverviews: MonthlyOverview[] = CROATIAN_MONTHS.map(
+      (name, idx) => {
+        const m = idx + 1;
+        const inc = monthlyMap[m].income;
+        const exp = monthlyMap[m].expenses;
+        return {
+          monthIndex: idx,
+          monthName: name,
+          totalIncome: inc,
+          totalExpenses: exp,
+          profit: inc - exp,
+        };
+      },
+    );
+
+    return {
+      totalIncome,
+      totalExpenses,
+      profit: totalIncome - totalExpenses,
+      monthlyOverviews,
+    };
+  }, [allTransactions, allMonthlyIncomes, selectedYear]);
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     if (file.type !== "application/pdf") {
       setUploadError("Molimo učitajte PDF datoteku");
       return;
     }
-
     setIsAnalyzing(true);
     setUploadError(null);
-
     try {
-      // Note: Since we cannot parse PDF in the browser without external libraries,
-      // we'll provide a manual input interface for now
       setUploadError(
         "Automatsko parsiranje PDF-a nije dostupno. Molimo koristite ručni unos podataka ispod ili izvezite podatke iz sustava za usporedbu.",
       );
@@ -87,151 +164,61 @@ export default function DataAnalysis() {
   };
 
   const _performComparison = () => {
-    if (!yearlyReport || pdfData.length === 0) return;
-
+    if (pdfData.length === 0) return;
     const results: ComparisonResult[] = [];
 
-    // Compare total income
-    const backendTotalIncome = centsToEur(
-      yearlyReport.totalOverview.totalIncome,
-    );
-    const pdfTotalIncome = pdfData.reduce(
-      (sum, data) => sum + data.totalIncome,
-      0,
-    );
-    const incomeDiff = pdfTotalIncome - backendTotalIncome;
-    const incomePercentDiff =
-      backendTotalIncome !== 0 ? (incomeDiff / backendTotalIncome) * 100 : 0;
+    const incomeDiff =
+      pdfData.reduce((s, d) => s + d.totalIncome, 0) - yearlyData.totalIncome;
+    const expDiff =
+      pdfData.reduce((s, d) => s + d.totalExpenses, 0) -
+      yearlyData.totalExpenses;
+    const profitDiff =
+      pdfData.reduce((s, d) => s + d.profit, 0) - yearlyData.profit;
+
+    const mkStatus = (pct: number): "match" | "minor" | "major" =>
+      Math.abs(pct) < 0.01 ? "match" : Math.abs(pct) < 1 ? "minor" : "major";
 
     results.push({
       category: "Ukupni prihodi",
-      pdfValue: pdfTotalIncome,
-      backendValue: backendTotalIncome,
+      pdfValue: pdfData.reduce((s, d) => s + d.totalIncome, 0),
+      backendValue: yearlyData.totalIncome,
       difference: incomeDiff,
-      percentageDiff: incomePercentDiff,
-      status:
-        Math.abs(incomePercentDiff) < 0.01
-          ? "match"
-          : Math.abs(incomePercentDiff) < 1
-            ? "minor"
-            : "major",
+      percentageDiff:
+        yearlyData.totalIncome !== 0
+          ? (incomeDiff / yearlyData.totalIncome) * 100
+          : 0,
+      status: mkStatus(
+        yearlyData.totalIncome !== 0
+          ? (incomeDiff / yearlyData.totalIncome) * 100
+          : 0,
+      ),
     });
-
-    // Compare total expenses
-    const backendTotalExpenses = centsToEur(
-      yearlyReport.totalOverview.totalExpenses,
-    );
-    const pdfTotalExpenses = pdfData.reduce(
-      (sum, data) => sum + data.totalExpenses,
-      0,
-    );
-    const expensesDiff = pdfTotalExpenses - backendTotalExpenses;
-    const expensesPercentDiff =
-      backendTotalExpenses !== 0
-        ? (expensesDiff / backendTotalExpenses) * 100
-        : 0;
-
     results.push({
       category: "Ukupni rashodi",
-      pdfValue: pdfTotalExpenses,
-      backendValue: backendTotalExpenses,
-      difference: expensesDiff,
-      percentageDiff: expensesPercentDiff,
-      status:
-        Math.abs(expensesPercentDiff) < 0.01
-          ? "match"
-          : Math.abs(expensesPercentDiff) < 1
-            ? "minor"
-            : "major",
+      pdfValue: pdfData.reduce((s, d) => s + d.totalExpenses, 0),
+      backendValue: yearlyData.totalExpenses,
+      difference: expDiff,
+      percentageDiff:
+        yearlyData.totalExpenses !== 0
+          ? (expDiff / yearlyData.totalExpenses) * 100
+          : 0,
+      status: mkStatus(
+        yearlyData.totalExpenses !== 0
+          ? (expDiff / yearlyData.totalExpenses) * 100
+          : 0,
+      ),
     });
-
-    // Compare profit
-    const backendProfit = centsToEur(yearlyReport.totalOverview.profit);
-    const pdfProfit = pdfData.reduce((sum, data) => sum + data.profit, 0);
-    const profitDiff = pdfProfit - backendProfit;
-    const profitPercentDiff =
-      backendProfit !== 0 ? (profitDiff / backendProfit) * 100 : 0;
-
     results.push({
       category: "Profit",
-      pdfValue: pdfProfit,
-      backendValue: backendProfit,
+      pdfValue: pdfData.reduce((s, d) => s + d.profit, 0),
+      backendValue: yearlyData.profit,
       difference: profitDiff,
-      percentageDiff: profitPercentDiff,
-      status:
-        Math.abs(profitPercentDiff) < 0.01
-          ? "match"
-          : Math.abs(profitPercentDiff) < 1
-            ? "minor"
-            : "major",
+      percentageDiff:
+        yearlyData.profit !== 0 ? (profitDiff / yearlyData.profit) * 100 : 0,
+      status: mkStatus(
+        yearlyData.profit !== 0 ? (profitDiff / yearlyData.profit) * 100 : 0,
+      ),
     });
-
-    // Compare monthly data
-    for (const pdfMonth of pdfData) {
-      const monthIndex = Number.parseInt(pdfMonth.month) - 1;
-      if (
-        monthIndex >= 0 &&
-        monthIndex < 12 &&
-        yearlyReport.monthlyOverviews[monthIndex]
-      ) {
-        const backendMonth = yearlyReport.monthlyOverviews[monthIndex];
-
-        const monthNames = [
-          "Siječanj",
-          "Veljača",
-          "Ožujak",
-          "Travanj",
-          "Svibanj",
-          "Lipanj",
-          "Srpanj",
-          "Kolovoz",
-          "Rujan",
-          "Listopad",
-          "Studeni",
-          "Prosinac",
-        ];
-
-        // Income comparison
-        const backendIncome = centsToEur(backendMonth.totalIncome);
-        const incomeDiff = pdfMonth.totalIncome - backendIncome;
-        const incomePercentDiff =
-          backendIncome !== 0 ? (incomeDiff / backendIncome) * 100 : 0;
-
-        results.push({
-          category: `${monthNames[monthIndex]} - Prihodi`,
-          pdfValue: pdfMonth.totalIncome,
-          backendValue: backendIncome,
-          difference: incomeDiff,
-          percentageDiff: incomePercentDiff,
-          status:
-            Math.abs(incomePercentDiff) < 0.01
-              ? "match"
-              : Math.abs(incomePercentDiff) < 1
-                ? "minor"
-                : "major",
-        });
-
-        // Expenses comparison
-        const backendExpenses = centsToEur(backendMonth.totalExpenses);
-        const expensesDiff = pdfMonth.totalExpenses - backendExpenses;
-        const expensesPercentDiff =
-          backendExpenses !== 0 ? (expensesDiff / backendExpenses) * 100 : 0;
-
-        results.push({
-          category: `${monthNames[monthIndex]} - Rashodi`,
-          pdfValue: pdfMonth.totalExpenses,
-          backendValue: backendExpenses,
-          difference: expensesDiff,
-          percentageDiff: expensesPercentDiff,
-          status:
-            Math.abs(expensesPercentDiff) < 0.01
-              ? "match"
-              : Math.abs(expensesPercentDiff) < 1
-                ? "minor"
-                : "major",
-        });
-      }
-    }
 
     setComparisonResults(results);
   };
@@ -270,7 +257,6 @@ export default function DataAnalysis() {
     let report = "IZVJEŠTAJ O USPOREDBI FINANCIJSKIH PODATAKA\n";
     report += `Datum: ${new Date().toLocaleDateString("hr-HR")}\n`;
     report += `Godina: ${selectedYear}\n\n`;
-
     report += "SAŽETAK:\n";
     report += `- Ukupno usporedbi: ${comparisonResults.length}\n`;
     report += `- Podudaranja: ${matches.length}\n`;
@@ -285,32 +271,6 @@ export default function DataAnalysis() {
         report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
         report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
       }
-      report += "\n";
-    }
-
-    if (minorIssues.length > 0) {
-      report += "MALE RAZLIKE (moguće zaokruživanje):\n";
-      for (const issue of minorIssues) {
-        report += `\n${issue.category}:\n`;
-        report += `  PDF vrijednost: ${formatCurrency(issue.pdfValue)}\n`;
-        report += `  Backend vrijednost: ${formatCurrency(issue.backendValue)}\n`;
-        report += `  Razlika: ${formatCurrency(issue.difference)} (${issue.percentageDiff.toFixed(2)}%)\n`;
-      }
-      report += "\n";
-    }
-
-    report += "PREPORUKE:\n";
-    if (majorIssues.length > 0) {
-      report +=
-        "1. Provjerite funkcije backend izračuna za kategorije s velikim razlikama\n";
-      report += "2. Provjerite granice datuma za mjesečne agregacije\n";
-      report += "3. Provjerite konverziju između centi i eura\n";
-    } else if (minorIssues.length > 0) {
-      report += "1. Male razlike mogu biti rezultat zaokruživanja\n";
-      report +=
-        "2. Provjerite da sve komponente koriste centralizirane funkcije konverzije\n";
-    } else {
-      report += "Svi podaci se podudaraju! Sustav radi ispravno.\n";
     }
 
     const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
@@ -336,8 +296,7 @@ export default function DataAnalysis() {
           <CardHeader>
             <CardTitle>Učitaj PDF datoteku</CardTitle>
             <CardDescription>
-              Učitajte PDF izvještaj za usporedbu s podacima iz sustava. Sustav
-              će automatski analizirati podatke i identificirati razlike.
+              Učitajte PDF izvještaj za usporedbu s podacima iz sustava.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -362,7 +321,6 @@ export default function DataAnalysis() {
                   </span>
                 )}
               </div>
-
               {uploadError && (
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
@@ -370,23 +328,20 @@ export default function DataAnalysis() {
                   <AlertDescription>{uploadError}</AlertDescription>
                 </Alert>
               )}
-
               <Alert>
                 <FileText className="h-4 w-4" />
                 <AlertTitle>Alternativa: Ručna usporedba</AlertTitle>
                 <AlertDescription>
-                  Možete izvesti podatke iz sustava koristeći opciju "Izvezi u
+                  Možete izvesti podatke iz sustava korištenjem opcije "Izvezi u
                   CSV" ili "Izvezi u PDF" u zaglavlju, a zatim ručno usporediti
-                  s vašim PDF dokumentom. Sustav koristi centralizirane funkcije
-                  konverzije (centsToEur) i hrvatske lokalne postavke za
-                  formatiranje valute s točno 2 decimalna mjesta.
+                  s vašim PDF dokumentom.
                 </AlertDescription>
               </Alert>
             </div>
           </CardContent>
         </Card>
 
-        {yearlyLoading ? (
+        {txLoading ? (
           <Card>
             <CardContent className="py-8">
               <div className="space-y-3">
@@ -396,13 +351,12 @@ export default function DataAnalysis() {
               </div>
             </CardContent>
           </Card>
-        ) : yearlyReport ? (
+        ) : (
           <Card>
             <CardHeader>
               <CardTitle>Trenutni podaci iz sustava ({selectedYear})</CardTitle>
               <CardDescription>
-                Ovi podaci su izračunati korištenjem backend funkcija s
-                pravilnim granicama datuma i konverzijom valute
+                Podaci izračunati direktno iz svih transakcija
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -413,24 +367,18 @@ export default function DataAnalysis() {
                     Ukupni prihodi
                   </div>
                   <div className="mt-2 text-2xl font-bold text-green-600">
-                    {formatCurrency(
-                      centsToEur(yearlyReport.totalOverview.totalIncome),
-                    )}
+                    {formatCurrency(yearlyData.totalIncome)}
                   </div>
                 </div>
-
                 <div className="rounded-lg border p-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <TrendingDown className="h-4 w-4" />
                     Ukupni rashodi
                   </div>
                   <div className="mt-2 text-2xl font-bold text-red-600">
-                    {formatCurrency(
-                      centsToEur(yearlyReport.totalOverview.totalExpenses),
-                    )}
+                    {formatCurrency(yearlyData.totalExpenses)}
                   </div>
                 </div>
-
                 <div className="rounded-lg border p-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <DollarSign className="h-4 w-4" />
@@ -438,14 +386,10 @@ export default function DataAnalysis() {
                   </div>
                   <div
                     className={`mt-2 text-2xl font-bold ${
-                      Number(yearlyReport.totalOverview.profit) >= 0
-                        ? "text-green-600"
-                        : "text-red-600"
+                      yearlyData.profit >= 0 ? "text-green-600" : "text-red-600"
                     }`}
                   >
-                    {formatCurrency(
-                      centsToEur(yearlyReport.totalOverview.profit),
-                    )}
+                    {formatCurrency(yearlyData.profit)}
                   </div>
                 </div>
               </div>
@@ -463,55 +407,35 @@ export default function DataAnalysis() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {yearlyReport.monthlyOverviews.map((overview, index) => {
-                        const allMonthNames = [
-                          "Siječanj",
-                          "Veljača",
-                          "Ožujak",
-                          "Travanj",
-                          "Svibanj",
-                          "Lipanj",
-                          "Srpanj",
-                          "Kolovoz",
-                          "Rujan",
-                          "Listopad",
-                          "Studeni",
-                          "Prosinac",
-                        ];
-                        const monthName =
-                          allMonthNames[index] ?? String(index + 1);
-                        return (
-                          <TableRow key={monthName}>
-                            <TableCell className="font-medium">
-                              {monthName}
-                            </TableCell>
-                            <TableCell className="text-right text-green-600">
-                              {formatCurrency(centsToEur(overview.totalIncome))}
-                            </TableCell>
-                            <TableCell className="text-right text-red-600">
-                              {formatCurrency(
-                                centsToEur(overview.totalExpenses),
-                              )}
-                            </TableCell>
-                            <TableCell
-                              className={`text-right font-semibold ${
-                                Number(overview.profit) >= 0
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }`}
-                            >
-                              {formatCurrency(centsToEur(overview.profit))}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {yearlyData.monthlyOverviews.map((overview) => (
+                        <TableRow key={overview.monthName}>
+                          <TableCell className="font-medium">
+                            {overview.monthName}
+                          </TableCell>
+                          <TableCell className="text-right text-green-600">
+                            {formatCurrency(overview.totalIncome)}
+                          </TableCell>
+                          <TableCell className="text-right text-red-600">
+                            {formatCurrency(overview.totalExpenses)}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-semibold ${
+                              overview.profit >= 0
+                                ? "text-green-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {formatCurrency(overview.profit)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
               </div>
             </CardContent>
           </Card>
-        ) : null}
+        )}
 
         {comparisonResults.length > 0 && (
           <Card>
@@ -595,7 +519,6 @@ export default function DataAnalysis() {
                     }
                   </div>
                 </div>
-
                 <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="h-5 w-5 text-yellow-600" />
@@ -610,7 +533,6 @@ export default function DataAnalysis() {
                     }
                   </div>
                 </div>
-
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                   <div className="flex items-center gap-2">
                     <AlertCircle className="h-5 w-5 text-red-600" />
@@ -647,67 +569,15 @@ export default function DataAnalysis() {
                   <code className="rounded bg-muted px-1 py-0.5">
                     centsToEur()
                   </code>{" "}
-                  koja dijeli s 100. Formatiranje koristi hrvatske lokalne
-                  postavke s točno 2 decimalna mjesta.
+                  koja dijeli s 100.
                 </p>
               </div>
-
               <div>
-                <h4 className="font-semibold">Granice datuma:</h4>
+                <h4 className="font-semibold">Izvor podataka:</h4>
                 <p className="text-muted-foreground">
-                  Mjesečne agregacije koriste funkcije{" "}
-                  <code className="rounded bg-muted px-1 py-0.5">
-                    getMonthStartTimestamp()
-                  </code>{" "}
-                  i{" "}
-                  <code className="rounded bg-muted px-1 py-0.5">
-                    getMonthEndTimestamp()
-                  </code>{" "}
-                  koje izračunavaju točne granice mjeseca usklađene s backend
-                  logikom.
-                </p>
-              </div>
-
-              <div>
-                <h4 className="font-semibold">Backend funkcije:</h4>
-                <ul className="list-inside list-disc text-muted-foreground">
-                  <li>
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      getMonthlyOverview()
-                    </code>{" "}
-                    - Izračunava mjesečni pregled
-                  </li>
-                  <li>
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      getYearlyOverview()
-                    </code>{" "}
-                    - Izračunava godišnji pregled
-                  </li>
-                  <li>
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      getMonthlyReport()
-                    </code>{" "}
-                    - Generira mjesečni izvještaj
-                  </li>
-                  <li>
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      getPdfFinancialReportData()
-                    </code>{" "}
-                    - Dohvaća podatke za PDF izvještaj
-                  </li>
-                </ul>
-              </div>
-
-              <div>
-                <h4 className="font-semibold">Točnost decimalnih mjesta:</h4>
-                <p className="text-muted-foreground">
-                  Sve komponente (Dashboard, Reports, QuickIncome, Transactions,
-                  Exports) koriste iste funkcije konverzije kako bi se osigurala
-                  dosljednost. Funkcija{" "}
-                  <code className="rounded bg-muted px-1 py-0.5">
-                    formatCurrency()
-                  </code>{" "}
-                  koristi se samo za prikaz, ne za izračune.
+                  Podaci se izračunavaju direktno iz svih transakcija i
+                  mjesečnih prihoda, osiguravajući da se svaka nova transakcija
+                  odmah odražava u ovom pregledu.
                 </p>
               </div>
             </div>

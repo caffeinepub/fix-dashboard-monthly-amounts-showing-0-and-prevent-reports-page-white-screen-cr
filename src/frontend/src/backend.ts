@@ -317,6 +317,8 @@ export interface backendInterface {
     getAllBusinessProfilesReadOnly(): Promise<Array<[Principal, BusinessProfile]>>;
     getAllMonthlyIncomes(): Promise<Array<MonthlyIncomeInput>>;
     getAllMonthlyIncomesReadOnly(): Promise<Array<MonthlyIncomeInput>>;
+    migrateMonthlyIncomesToTransactions(): Promise<bigint>;
+    clearMigratedMonthlyIncomes(): Promise<void>;
     getAllTransactions(): Promise<Array<Transaction>>;
     getAllTransactionsReadOnly(): Promise<Array<Transaction>>;
     getBusinessPerformanceAnalysis(period: BenchmarkPeriod): Promise<PerformanceAnalysis>;
@@ -504,6 +506,32 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.getAllMonthlyIncomesReadOnly();
             return result;
+        }
+    }
+    async migrateMonthlyIncomesToTransactions(): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.migrateMonthlyIncomesToTransactions();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.migrateMonthlyIncomesToTransactions();
+            return result;
+        }
+    }
+    async clearMigratedMonthlyIncomes(): Promise<void> {
+        if (this.processError) {
+            try {
+                await this.actor.clearMigratedMonthlyIncomes();
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            await this.actor.clearMigratedMonthlyIncomes();
         }
     }
     async getAllTransactions(): Promise<Array<Transaction>> {

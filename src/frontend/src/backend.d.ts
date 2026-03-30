@@ -235,6 +235,8 @@ export interface backendInterface {
     getAllBusinessProfilesReadOnly(): Promise<Array<[Principal, BusinessProfile]>>;
     getAllMonthlyIncomes(): Promise<Array<MonthlyIncomeInput>>;
     getAllMonthlyIncomesReadOnly(): Promise<Array<MonthlyIncomeInput>>;
+    migrateMonthlyIncomesToTransactions(): Promise<bigint>;
+    clearMigratedMonthlyIncomes(): Promise<void>;
     getAllTransactions(): Promise<Array<Transaction>>;
     getAllTransactionsReadOnly(): Promise<Array<Transaction>>;
     getBusinessPerformanceAnalysis(period: BenchmarkPeriod): Promise<PerformanceAnalysis>;

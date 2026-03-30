@@ -200,6 +200,8 @@ export interface _SERVICE {
   'addTransaction' : ActorMethod<[TransactionInput], bigint>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'authorizeReadOnlyAccess' : ActorMethod<[Principal], undefined>,
+  'clearMigratedMonthlyIncomes' : ActorMethod<[], undefined>,
+  'migrateMonthlyIncomesToTransactions' : ActorMethod<[], bigint>,
   'deleteMonthlyIncome' : ActorMethod<[bigint, bigint], undefined>,
   'deleteTransaction' : ActorMethod<[bigint], undefined>,
   'exportData' : ActorMethod<[], ExportData>,

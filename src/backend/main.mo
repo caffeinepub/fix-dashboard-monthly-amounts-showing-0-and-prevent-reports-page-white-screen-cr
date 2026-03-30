@@ -2107,4 +2107,64 @@ actor RestaurantFinance {
     };
     wakeUpRoutineStarted;
   };
+
+  // Migrate monthlyIncomes to standard transactions (idempotent)
+  public shared ({ caller }) func migrateMonthlyIncomesToTransactions() : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can run migration");
+    };
+
+    var migratedCount : Nat = 0;
+
+    // Build set of existing migration descriptions to avoid duplicates
+    let existingDescriptions = Map.empty<Text, Bool>();
+    transactions.values().forEach(
+      func(t) {
+        if (t.transactionType == #prihod) {
+          existingDescriptions.add(t.description, true);
+        };
+      }
+    );
+
+    monthlyIncomes.entries().forEach(
+      func((year, months)) {
+        months.entries().forEach(
+          func((month, amount)) {
+            let desc = "Brzi unos - " # month.toText() # "/" # year.toText();
+            // Only migrate if not already migrated
+            switch (existingDescriptions.get(desc)) {
+              case (?_) { /* already exists, skip */ };
+              case (null) {
+                // Create a date for the 1st of the month
+                let id = nextId;
+                nextId += 1;
+                let transaction : Transaction = {
+                  id;
+                  amount;
+                  transactionType = #prihod;
+                  expenseCategory = null;
+                  paymentMethod = null;
+                  date = 0; // Will be set to epoch; frontend will display by month/year
+                  description = desc;
+                };
+                transactions.add(id, transaction);
+                migratedCount += 1;
+              };
+            };
+          }
+        );
+      }
+    );
+
+    migratedCount;
+  };
+
+  // Clear monthlyIncomes after confirmed migration
+  public shared ({ caller }) func clearMigratedMonthlyIncomes() : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can clear monthly incomes");
+    };
+    monthlyIncomes := Map.empty<Nat, Map.Map<Nat, Int>>();
+  };
+
 };
