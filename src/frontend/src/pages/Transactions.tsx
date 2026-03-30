@@ -1,9 +1,4 @@
-import {
-  ExpenseCategory,
-  type MonthlyIncomeInput,
-  type Transaction,
-  TransactionType,
-} from "@/backend";
+import { ExpenseCategory, type Transaction, TransactionType } from "@/backend";
 import TransactionDialog from "@/components/TransactionDialog";
 import {
   AlertDialog,
@@ -34,10 +29,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   useDeleteTransaction,
-  useGetAllMonthlyIncomes,
   useGetAllTransactions,
 } from "@/hooks/useQueries";
-import { centsToEur, formatCurrency, getMonthName } from "@/lib/utils";
+import { centsToEur, formatCurrency } from "@/lib/utils";
 import {
   Calendar,
   Edit,
@@ -80,8 +74,6 @@ export default function Transactions() {
   const [showFilters, setShowFilters] = useState(false);
 
   const { data: transactions, isLoading } = useGetAllTransactions();
-  const { data: monthlyIncomes, isLoading: incomesLoading } =
-    useGetAllMonthlyIncomes();
   const deleteTransaction = useDeleteTransaction();
 
   const handleEdit = (transaction: Transaction) => {
@@ -111,16 +103,6 @@ export default function Transactions() {
     setFilterType("all");
     setFilterCategory("all");
   };
-
-  // Sort monthly incomes newest first
-  const sortedMonthlyIncomes = useMemo(() => {
-    if (!monthlyIncomes) return [];
-    return [...monthlyIncomes].sort((a, b) => {
-      const yearDiff = Number(b.year) - Number(a.year);
-      if (yearDiff !== 0) return yearDiff;
-      return Number(b.month) - Number(a.month);
-    });
-  }, [monthlyIncomes]);
 
   // Filter transactions based on selected filters
   const filteredTransactions = useMemo(() => {
@@ -192,66 +174,6 @@ export default function Transactions() {
           </Button>
         </div>
       </div>
-
-      {/* Brzi unos prihoda section */}
-      {(incomesLoading ||
-        (sortedMonthlyIncomes && sortedMonthlyIncomes.length > 0)) && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-base sm:text-lg">
-              Brzi unos prihoda
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              Prihodi uneseni putem brzog unosa po mjesecima
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {incomesLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-2 pr-4 font-medium text-muted-foreground">
-                        Godina
-                      </th>
-                      <th className="text-left py-2 pr-4 font-medium text-muted-foreground">
-                        Mjesec
-                      </th>
-                      <th className="text-right py-2 font-medium text-muted-foreground">
-                        Iznos
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedMonthlyIncomes.map(
-                      (income: MonthlyIncomeInput, idx: number) => (
-                        <tr
-                          key={`${Number(income.year)}-${Number(income.month)}`}
-                          data-ocid={`monthly-incomes.item.${idx + 1}`}
-                          className="border-b last:border-0 hover:bg-muted/50"
-                        >
-                          <td className="py-2 pr-4">{Number(income.year)}</td>
-                          <td className="py-2 pr-4">
-                            {getMonthName(Number(income.month))}
-                          </td>
-                          <td className="py-2 text-right font-medium text-green-600">
-                            +{formatCurrency(centsToEur(income.amount))}
-                          </td>
-                        </tr>
-                      ),
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Filter Panel */}
       {showFilters && (
